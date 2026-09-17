@@ -28,7 +28,16 @@ English-first board support, with every hardware assumption written down next to
 - 🟡 Port the StackChan board from the reference project, **with personal and homelab specifics removed
   as it comes in** — never committed first and cleaned later. Face, head, LEDs, camera, audio, power and
   wake word ported; investigation instruments removed; the homelab client replaced by a `StatusSource`
-  interface with nothing attached. Awaiting a hardware test.
+  interface with nothing attached. Tested on hardware: voice, face, head, idle dim and the wake word all
+  work, and the port found two real bugs that the reference firmware had been surviving by luck (below).
+- ⬜ **Diagnose the boot-time I²C glitch, rather than only surviving it.** About ten seconds into every
+  boot, as Wi-Fi associates and the wake-word engine starts, the shared bus NAKs for a few hundred
+  milliseconds. Both chips on it go unreachable, and two separate faults came out of that one window: a
+  silent amplifier (`esp_codec_dev_open` reports success while its register writes go nowhere) and a
+  servo rail "failure" that was really an unreadable status register. Both are now handled — the codec
+  checks the amp answered and retries, the PY32 refuses to write a guess — but nothing here explains
+  *why* the bus stalls. Candidates: the PMIC, contention from the LED latch, or the radio's power draw.
+  Worth knowing before telling other people their hardware is fine.
 - ⬜ 🔑 **Per-unit servo calibration.** `scs_servo.h` hard-codes the reference unit's factory centre
   (460 / 620) and a +14 pan trim. Another robot's centre will differ, and the tilt safety clamp is computed
   around it — so this is a **safety** item, not cosmetic. Read each unit's own factory calibration, which
@@ -119,6 +128,10 @@ The reason the project exists, so it gets a page of its own rather than a promis
 - ⬜ `xiaozhi-esp32`: 14 language packs start `ACCESS_VIA_BROWSER` with a Chinese full-width comma
   (fixed here already)
 - ⬜ `xiaozhi-esp32`: `I2cDevice` aborts the whole device on one flaky I²C transfer (fixed here already)
+- ⬜ `xiaozhi-esp32`: CoreS3 trusts `esp_codec_dev_open`, which returns success when the amplifier is
+  unreachable — the robot then plays every reply into a chip that is not listening, silently. Affects the
+  stock CoreS3 board, not just this one; it only looks intermittent because a boot chime sometimes
+  happens to retry the open at the right moment (fixed here already)
 - ⬜ Possibly: English logging / i18n for the server
 
 ## Release ⬜
