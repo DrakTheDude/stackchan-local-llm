@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "प्रतिक्रिया का समय समाप्त",
         "SERVER_ERROR": "भेजना असफल, कृपया नेटवर्क जांचें",
         "CONNECT_TO_HOTSPOT": "फोन को हॉटस्पॉट से कनेक्ट करें ",
-        "ACCESS_VIA_BROWSER": "，ब्राउज़र के माध्यम से पहुंचें ",
+        "ACCESS_VIA_BROWSER": ", ब्राउज़र के माध्यम से पहुंचें ",
         "WIFI_CONFIG_MODE": "नेटवर्क कॉन्फ़िगरेशन मोड",
         "ENTERING_WIFI_CONFIG_MODE": "नेटवर्क कॉन्फ़िगरेशन मोड में प्रवेश...",
         "SCANNING_WIFI": "Wi-Fi स्कैन कर रहे हैं...",

@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Timpul de răspuns a expirat",
         "SERVER_ERROR": "Trimiterea a eșuat, verificați rețeaua",
         "CONNECT_TO_HOTSPOT": "Conectați telefonul la hotspot ",
-        "ACCESS_VIA_BROWSER": "，accesați prin browser ",
+        "ACCESS_VIA_BROWSER": ", accesați prin browser ",
         "WIFI_CONFIG_MODE": "Modul de configurare rețea",
         "ENTERING_WIFI_CONFIG_MODE": "Se intră în modul de configurare rețea...",
         "SCANNING_WIFI": "Se scanează Wi-Fi...",

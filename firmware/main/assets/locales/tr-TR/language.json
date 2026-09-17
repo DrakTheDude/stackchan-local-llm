@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Yanıt zaman aşımı",
         "SERVER_ERROR": "Gönderme başarısız, ağı kontrol edin",
         "CONNECT_TO_HOTSPOT": "Telefonu hotspot'a bağlayın ",
-        "ACCESS_VIA_BROWSER": "，tarayıcı üzerinden erişin ",
+        "ACCESS_VIA_BROWSER": ", tarayıcı üzerinden erişin ",
         "WIFI_CONFIG_MODE": "Ağ yapılandırma modu",
         "ENTERING_WIFI_CONFIG_MODE": "Ağ yapılandırma moduna giriliyor...",
         "SCANNING_WIFI": "Wi-Fi taranıyor...",

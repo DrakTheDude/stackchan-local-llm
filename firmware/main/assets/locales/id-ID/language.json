@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Waktu respons habis",
         "SERVER_ERROR": "Pengiriman gagal, periksa jaringan",
         "CONNECT_TO_HOTSPOT": "Hubungkan ponsel ke hotspot ",
-        "ACCESS_VIA_BROWSER": "，akses melalui browser ",
+        "ACCESS_VIA_BROWSER": ", akses melalui browser ",
         "WIFI_CONFIG_MODE": "Mode konfigurasi jaringan",
         "ENTERING_WIFI_CONFIG_MODE": "Memasuki mode konfigurasi jaringan...",
         "SCANNING_WIFI": "Memindai Wi-Fi...",

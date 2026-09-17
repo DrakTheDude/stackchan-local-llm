@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Vastauksen aikakatkaisu",
         "SERVER_ERROR": "Lähetys epäonnistui, tarkista verkko",
         "CONNECT_TO_HOTSPOT": "Yhdistä puhelin hotspottiin ",
-        "ACCESS_VIA_BROWSER": "，pääsy selaimen kautta ",
+        "ACCESS_VIA_BROWSER": ", pääsy selaimen kautta ",
         "WIFI_CONFIG_MODE": "Verkon konfigurointitila",
         "ENTERING_WIFI_CONFIG_MODE": "Siirrytään verkon konfigurointitilaan...",
         "SCANNING_WIFI": "Skannataan Wi-Fi...",

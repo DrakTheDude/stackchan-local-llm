@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Час очікування відповіді",
         "SERVER_ERROR": "Помилка відправки, перевірте мережу",
         "CONNECT_TO_HOTSPOT": "Підключіть телефон до точки доступу ",
-        "ACCESS_VIA_BROWSER": "，доступ через браузер ",
+        "ACCESS_VIA_BROWSER": ", доступ через браузер ",
         "WIFI_CONFIG_MODE": "Режим налаштування мережі",
         "ENTERING_WIFI_CONFIG_MODE": "Вхід у режим налаштування мережі...",
         "SCANNING_WIFI": "Сканування Wi-Fi...",

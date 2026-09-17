@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Tiempo de espera agotado",
         "SERVER_ERROR": "Error de envío, verifique la red",
         "CONNECT_TO_HOTSPOT": "Conectar teléfono al punto de acceso ",
-        "ACCESS_VIA_BROWSER": "，acceder mediante navegador ",
+        "ACCESS_VIA_BROWSER": ", acceder mediante navegador ",
         "WIFI_CONFIG_MODE": "Modo configuración de red",
         "ENTERING_WIFI_CONFIG_MODE": "Entrando en modo configuración de red...",
         "SCANNING_WIFI": "Escaneando Wi-Fi...",

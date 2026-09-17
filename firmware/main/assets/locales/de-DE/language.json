@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Antwort-Timeout",
         "SERVER_ERROR": "Senden fehlgeschlagen, bitte Netzwerk prüfen",
         "CONNECT_TO_HOTSPOT": "Handy mit Hotspot verbinden ",
-        "ACCESS_VIA_BROWSER": "，Browser öffnen ",
+        "ACCESS_VIA_BROWSER": ", Browser öffnen ",
         "WIFI_CONFIG_MODE": "Netzwerkkonfigurationsmodus",
         "ENTERING_WIFI_CONFIG_MODE": "Netzwerkkonfigurationsmodus eingeben...",
         "SCANNING_WIFI": "Wi-Fi scannen...",

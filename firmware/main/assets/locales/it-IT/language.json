@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Timeout risposta",
         "SERVER_ERROR": "Invio fallito, controllare la rete",
         "CONNECT_TO_HOTSPOT": "Connetti telefono al hotspot ",
-        "ACCESS_VIA_BROWSER": "，accedi tramite browser ",
+        "ACCESS_VIA_BROWSER": ", accedi tramite browser ",
         "WIFI_CONFIG_MODE": "Modalità configurazione rete",
         "ENTERING_WIFI_CONFIG_MODE": "Entrata in modalità configurazione rete...",
         "SCANNING_WIFI": "Scansione Wi-Fi...",

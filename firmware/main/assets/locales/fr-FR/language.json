@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Délai d'attente de réponse",
         "SERVER_ERROR": "Échec d'envoi, veuillez vérifier le réseau",
         "CONNECT_TO_HOTSPOT": "Connecter le téléphone au point d'accès ",
-        "ACCESS_VIA_BROWSER": "，accéder via le navigateur ",
+        "ACCESS_VIA_BROWSER": ", accéder via le navigateur ",
         "WIFI_CONFIG_MODE": "Mode configuration réseau",
         "ENTERING_WIFI_CONFIG_MODE": "Entrer en mode configuration réseau...",
         "SCANNING_WIFI": "Scan Wi-Fi...",

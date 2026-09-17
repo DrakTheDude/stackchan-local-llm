@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Przekroczono czas oczekiwania na odpowiedź",
         "SERVER_ERROR": "Wysyłanie nie powiodło się, sprawdź sieć",
         "CONNECT_TO_HOTSPOT": "Podłącz telefon do hotspotu ",
-        "ACCESS_VIA_BROWSER": "，dostęp przez przeglądarkę ",
+        "ACCESS_VIA_BROWSER": ", dostęp przez przeglądarkę ",
         "WIFI_CONFIG_MODE": "Tryb konfiguracji sieci",
         "ENTERING_WIFI_CONFIG_MODE": "Wchodzenie w tryb konfiguracji sieci...",
         "SCANNING_WIFI": "Skanowanie Wi-Fi...",

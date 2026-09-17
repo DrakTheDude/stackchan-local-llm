@@ -28,7 +28,7 @@
         "SERVER_TIMEOUT": "Čas odpovědi vypršel",
         "SERVER_ERROR": "Odeslání selhalo, zkontrolujte síť",
         "CONNECT_TO_HOTSPOT": "Připojte telefon k hotspotu ",
-        "ACCESS_VIA_BROWSER": "，přístup přes prohlížeč ",
+        "ACCESS_VIA_BROWSER": ", přístup přes prohlížeč ",
         "WIFI_CONFIG_MODE": "Režim konfigurace sítě",
         "ENTERING_WIFI_CONFIG_MODE": "Vstup do režimu konfigurace sítě...",
         "SCANNING_WIFI": "Skenování Wi-Fi...",
