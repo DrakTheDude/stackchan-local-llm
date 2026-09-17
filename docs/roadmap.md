@@ -10,14 +10,14 @@ The **critical path** to a usable release is marked 🔑.
 
 ---
 
-## Foundation 🟡
+## Foundation ✅
 
 - ✅ Repository scaffold, project brief, publishability rule
 - ✅ Import upstream `xiaozhi-esp32` at `66bf9f7` as a squashed subtree under `firmware/` — tree hash
   verified identical to upstream (`b940d7e`)
 - ✅ Name: `stackchan-local-llm`
-- ⬜ Translate upstream's Chinese firmware comments to English (~233 lines, 34 files — measured), as its
-  own commit
+- ✅ Translate upstream's Chinese firmware comments to English — 244 lines in 35 files, code verified
+  unchanged outside comments. Language packs and bilingual brand names kept on purpose.
 
 ---
 
@@ -106,6 +106,8 @@ The reason the project exists, so it gets a page of its own rather than a promis
 - ⬜ `xiaozhi-esp32-server`: the TTS sentence splitter missing the ASCII full stop; `.rstrip()` eating the
   spaces between streamed chunks. Both have measured reproductions.
 - ⬜ `xiaozhi-esp32`: the StackChan board; a runtime-configurable server address
+- ⬜ `xiaozhi-esp32`: 14 language packs start `ACCESS_VIA_BROWSER` with a Chinese full-width comma
+  (fixed here already)
 - ⬜ Possibly: English logging / i18n for the server
 
 ## Release ⬜
