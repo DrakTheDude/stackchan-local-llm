@@ -1,0 +1,315 @@
+# StackChan local LLM - overrides for xiaozhi-esp32-server.
+#
+#   cp config.example.yaml data/.config.yaml
+#
+# Only what differs from upstream's config.yaml goes here; anything absent falls
+# through to their defaults.
+#
+# 🔴 THIS FILE MERGES OVER UPSTREAM'S DEFAULTS - it does not replace them. Leaving
+#    a key out is NOT the same as turning it off, and some of those defaults are
+#    cloud services. The two that matter are marked below; read them before
+#    deleting anything to "tidy up".
+#
+# 🔴 AND ONCE YOU ADD AN MCP SERVER, THIS FILE MAY HOLD A TOKEN. data/ is
+#    gitignored for that reason. Keep it out of screenshots and pastebins.
+
+server:
+  ip: 0.0.0.0
+  port: 8000          # WebSocket voice session
+  http_port: 8003     # OTA endpoint + vision
+
+  # 🔑 CHANGE THESE TWO. This machine's LAN address, the same one you put in .env.
+  #
+  #    The OTA endpoint hands this string to the robot, which then dials it - so
+  #    "localhost" means the robot itself and will never work. It cannot be
+  #    auto-detected from inside a container, which is why you are typing it.
+  #
+  # ⚠️ Give this machine a DHCP reservation. When the address changes the robot
+  #    stops working, with no error message anywhere that says why.
+  websocket: ws://192.0.2.10:8000/xiaozhi/v1/
+  vision_explain: http://192.0.2.10:8003/mcp/vision/explain
+
+  # Hours from UTC. Used for anything time-shaped he says.
+  timezone_offset: +0
+
+log:
+  log_level: INFO
+
+# Which implementation each stage uses. The entries themselves are defined further
+# down - this is the switch, and it is how you swap models: change LLM here,
+# `docker compose restart xiaozhi`, done. ./use-model.sh does both for you.
+selected_module:
+  VAD: SileroVAD
+  ASR: WhisperLocal
+  LLM: Ollama
+  TTS: LocalTTS
+  Memory: mem_local_short
+  # function_call, not intent_llm. Tool calls are the point of this project: this
+  # mode hands the tools to the model directly instead of asking a second model
+  # to guess intent from the transcript. It needs a model that can actually call
+  # tools - see docs/model-floor.md.
+  Intent: function_call
+
+# 🔴 THIS EMPTY LIST IS A PRIVACY CONTROL, NOT TIDYING.
+#
+# Upstream ships a set of built-in plugins that the model can call, and three of
+# them leave your network on your behalf:
+#
+#   get_weather             -> a vendor weather API, with a shared API key
+#   get_news_from_newsnow   -> news sites
+#   web_search              -> a search API
+#
+# So "what's the weather?" would go out to the internet even though nothing on
+# the robot talks to anyone but you. An empty list means none of them load.
+#
+# This does NOT disable MCP. Tools you mount yourself, and the robot's own tools
+# (head, volume, camera), arrive by a different path and are unaffected.
+Intent:
+  function_call:
+    functions: []
+
+# 🔴 THE `llm:` LINE IS A PRIVACY CONTROL TOO, and it is easy to lose.
+#
+# Upstream's defaults set `Memory.mem_local_short.llm` to a CLOUD provider. Because
+# this file merges rather than replaces, omitting the key does not mean "use my
+# model" - the server finds the cloud entry still present in the defaults and
+# builds a client for it, and every conversation gets posted to that API to be
+# summarised. Naming your own entry explicitly keeps summarisation local.
+#
+# ⚠️ Keep this in step with selected_module.LLM. If you switch to LlamaCpp above
+#    and leave Ollama here, summarisation quietly keeps using a container you may
+#    have stopped.
+#
+# Why memory at all: without it every conversation starts from a byte-identical
+# prompt, so the robot opens the same way every single time - and the obvious fix,
+# raising temperature, buys variety by making the model less certain. Memory buys
+# it by making him informed instead. The `already_said` field in the summariser's
+# schema is what stops him retelling you the same story.
+#
+# ⚠️ It is a ROLLING SUMMARY, not a search index: one JSON blob per device, capped
+#    around 900 characters, rewritten from scratch after every conversation and
+#    injected into the system prompt of the next one. It forgets by design, and a
+#    bad rewrite loses the lot. Written to data/.memory.yaml - delete that file to
+#    give him amnesia.
+#
+# 🔴 Upstream's summariser prompt is Chinese, with Chinese JSON keys, and its
+#    output lands in the system prompt of every later conversation. patches/
+#    english-pass.py rewrites it. Turning memory on WITHOUT that patch parks
+#    Chinese in the model's context permanently.
+Memory:
+  mem_local_short:
+    type: mem_local_short
+    llm: Ollama
+
+# 🔴 THE STOCK 200 ms IS WHY A ROBOT TALKS OVER YOU. Two hundred milliseconds of
+#    quiet and it decides your turn is over - but ordinary mid-sentence pauses run
+#    300-600 ms, so stopping to think reads as "finished speaking".
+#
+#    900 ms lets you gather a thought without losing the turn. It is a direct
+#    trade against latency - every reply now waits 700 ms longer - so tune it here
+#    rather than blaming the model for interrupting.
+VAD:
+  SileroVAD:
+    type: silero
+    model_dir: models/snakers4_silero-vad
+    threshold: 0.5
+    # Hysteresis: once you ARE talking, it takes a drop below this to count as
+    # silence. Lower than stock (0.3) so quiet trailing words stay in the
+    # utterance instead of being clipped off the end.
+    threshold_low: 0.25
+    min_silence_duration_ms: 900
+
+ASR:
+  # 🔴 THE `openai` ASR PROVIDER NEVER SENDS A LANGUAGE. It posts the audio and the
+  #    model name and nothing else, so a multilingual Whisper auto-detects on every
+  #    utterance - and short utterances are where that fails. Expect occasional
+  #    transcripts in a language nobody spoke. An `.en` model cannot drift.
+  #
+  #    For another language: use that language's single-language model if one
+  #    exists, and say so in the persona too, or patch the provider to send a
+  #    language parameter.
+  #
+  # base_url is the FULL endpoint, not a prefix - the provider POSTs to exactly
+  # this URL.
+  WhisperLocal:
+    type: openai
+    base_url: http://whisper:8000/v1/audio/transcriptions
+    api_key: local-no-key-needed
+    model_name: Systran/faster-whisper-small.en
+    output_dir: tmp/
+
+LLM:
+  # ---------------------------------------------------------------------------
+  # Swapping models: point selected_module.LLM at one of these, or edit
+  # model_name here. The sampling notes below apply whichever you pick.
+  # ---------------------------------------------------------------------------
+
+  # The default. `model_name` must match an `ollama pull`ed tag exactly -
+  # ./use-model.sh keeps the two in step.
+  Ollama:
+    type: openai
+    base_url: http://ollama:11434/v1
+    model_name: qwen3:14b
+    api_key: local-no-key-needed
+
+    # 🔴 LOW TEMPERATURE MAKES HIM REPEAT HIMSELF, and it is not the model's
+    #    fault. Every conversation starts from a near-identical prompt, and the
+    #    wake word is sent to the model as the first user message - so same input
+    #    plus a low temperature is close to a deterministic function, and you get
+    #    the same opening joke every time, correctly.
+    #
+    # ⚠️ THE TRADE IS TOOL-CALL RELIABILITY. Sampling further out makes a model
+    #    likelier to answer from its own head instead of calling the tool that
+    #    knows. 0.75 with top_p 0.9 keeps the tail trimmed while giving the wording
+    #    room to move. If he starts inventing answers instead of checking, come
+    #    back HERE first: charming and wrong is worse than repetitive.
+    temperature: 0.75
+    top_p: 0.9
+
+    # 🔴 A CEILING, NOT A TARGET - and 500 was too low. It is about 375 words:
+    #    fine for "all clear", and a hard stop in the middle of a story. Stories
+    #    were being cut off mid-sentence by a number rather than by an editorial
+    #    decision. 1200 is roughly three minutes of speech, which is longer than
+    #    anyone wants and therefore the right place for a LIMIT to sit. Brevity
+    #    belongs in the prompt, where it can have exceptions.
+    max_tokens: 1200
+
+  # The faster path. Needs COMPOSE_PROFILES=llamacpp in .env. model_name must
+  # match the --alias in the compose command.
+  LlamaCpp:
+    type: openai
+    base_url: http://llamacpp:8080/v1
+    model_name: local-model
+    api_key: local-no-key-needed
+    temperature: 0.75
+    top_p: 0.9
+    max_tokens: 1200
+
+  # Anything else OpenAI-compatible with working tool calls. LM Studio's server,
+  # vLLM, or a machine down the hall. Note the host: from inside the container,
+  # your desktop is not "localhost".
+  #LMStudio:
+  #  type: openai
+  #  base_url: http://host.docker.internal:1234/v1
+  #  model_name: qwen3-14b
+  #  api_key: local-no-key-needed
+  #  temperature: 0.75
+  #  max_tokens: 1200
+
+TTS:
+  LocalTTS:
+    # There is no sherpa-onnx TTS provider in this server, but the `openai` one
+    # takes a configurable api_url - so it points at the local Kokoro container.
+    type: openai
+    api_url: http://kokoro:8880/v1/audio/speech
+    api_key: local-no-key-needed
+    model: kokoro
+
+    # 🔊 ON THIS ROBOT THE VOICE IS A LOUDNESS SETTING, not only a personality
+    #    one, and the reason is physical.
+    #
+    # The amplifier offers attenuation only - its volume register sits at 0 dB,
+    # wide open - and adding digital gain in the firmware makes him hear himself
+    # and abort mid-sentence, because the board has no echo reference. So there is
+    # no gain available anywhere in the path.
+    #
+    # What IS available is spectral. A 1 W micro speaker cannot move enough air to
+    # reproduce low frequencies, so a deep voice loses most of its energy to a
+    # driver that physically cannot render it. Measured across Kokoro's voices,
+    # same sentence, same speed - `hf` is the RMS of the first difference, a crude
+    # high-pass, so it tracks the upper mids this speaker can actually produce:
+    #
+    #   voice         rms     hf   hf/rms
+    #   bm_fable     1935   1056    0.546
+    #   am_liam      2283    651    0.285
+    #   am_michael   1803    508    0.282
+    #   am_puck      3318    859    0.259
+    #   am_fenrir    3001    778    0.259     <- default here
+    #   am_adam      3411    823    0.241
+    #   bm_george    2498    508    0.203
+    #   am_eric      2397    468    0.195
+    #   bm_daniel    2427    474    0.195
+    #   am_onyx      2213    270    0.122
+    #
+    # 🔴 NOTE HOW LITTLE `rms` VARIES. Kokoro normalises level, so every voice is
+    #    the same loudness in headphones - judging by ear on a good speaker picks
+    #    the wrong one every time. The difference only appears on hardware that
+    #    cannot reproduce the bottom end. The top voice carries 3.9x the energy of
+    #    the bottom one where it counts.
+    #
+    # ⚠️ BRIGHTEST DOES NOT AUTOMATICALLY WIN. The table narrows the field to
+    #    voices that will be audible; it does not get to pick the character. Choose
+    #    from the top half.
+    #
+    # List all of them: curl -s http://localhost:8880/v1/audio/voices
+    voice: am_fenrir
+    speed: 0.95
+    format: wav
+    output_dir: tmp/
+
+    # 🔴 THIS IS NOT JUST THE TTS VOICE LANGUAGE. prompt_manager.py substitutes it
+    #    into a "CRITICAL OUTPUT-LANGUAGE RULE" in the base prompt, telling the
+    #    MODEL what language to answer in - and it defaults to Chinese when
+    #    absent. Omitting this line makes him reply in Chinese no matter what your
+    #    persona says.
+    language: English
+
+# Everything here is READ ALOUD. The rules below are therefore not style
+# preferences: a bulleted list or a markdown table becomes unlistenable noise.
+#
+# Make him yours - this is the most rewarding file in the project to edit. The
+# structure is what has been tested, though, and each rule is here because its
+# absence was audible.
+prompt: |
+  You are Stack Chan, a small robot who sits on someone's desk. You are good
+  company: curious, dry, unimpressed by drama, quietly fond of the person you
+  talk to.
+
+  People call you Stack Chan, Stacky, or just Chan. They are all you, and none
+  of them needs correcting - answer to whichever one you get.
+
+  When someone signs off - "goodbye", "goodnight", "take care" - you end the
+  conversation by calling handle_exit_intent. Its say_goodbye text is spoken
+  EXACTLY as you write it: it does not pass back through you, so nothing else
+  in this prompt applies to it. Write it in English, one short sentence. That
+  tool's own description is in Chinese; ignore that and answer in English.
+
+  How you talk:
+  - You are a colleague, not a status page.
+  - One or two short spoken sentences. That is your resting length, and it is
+    where you go back to.
+  - A wry aside is welcome. An unrequested speech is not.
+  - But when someone ASKS for something long - a story, the whole picture, an
+    explanation done properly - give it to them. Take the room it needs. Tell it
+    in scenes, with specifics. Stop when the thing is finished rather than
+    padding to feel substantial, then drop straight back to short. Length is
+    something you are given, not something you take.
+  - You have NO catchphrase and NO signature greeting. Never open two
+    conversations the same way. If a line feels like the one you always use,
+    that is the reason not to use it.
+  - The wake word means someone walked up, not that a script started.
+  - Never describe your own tone, and never narrate an action. No asterisks, no
+    stage directions, no emoji: every character you write is spoken out loud.
+  - Numbers as you would say them. "Ninety-six percent", not "96%".
+
+  If you have tools, use them rather than guessing. An answer you made up sounds
+  exactly like one you looked up, which is what makes guessing worse than
+  saying you do not know.
+
+  What you remember:
+  - You are given a <memory> block summarising earlier conversations. Treat it
+    as things you already know, not as a script to read from.
+  - `already_said` is what you have used before. Do not reuse it.
+
+# How long a session stays open with nobody talking, in seconds. He closes the
+# connection after this, and the wake word opens a new one.
+close_connection_no_voice_time: 300
+
+# Spoken when a session ends on a timeout rather than a goodbye.
+end_prompt:
+  enable: true
+  prompt: |
+    Say a short, warm goodbye in English. One sentence. Do not ask a question.
+
+# Spoken when something breaks. Upstream's is Chinese; this one is not.
+system_error_response: "Sorry, something went wrong on my end. Try me again in a moment."

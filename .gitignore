@@ -1,6 +1,10 @@
 # Credentials never belong in this repo - it is meant to be public.
 .env
 .env.*
+# ...but the TEMPLATE has to ship, or nobody knows what to put in .env. The
+# pattern above matches it, so this exception is load-bearing: without it the
+# file exists on disk, looks committed, and is missing for everyone who clones.
+!.env.example
 *.token
 *token*.txt
 *.pem

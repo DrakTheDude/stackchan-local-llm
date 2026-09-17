@@ -1,0 +1,207 @@
+# The local voice stack: wake word on the robot, everything else here.
+#
+#   cd server
+#   cp .env.example .env                 # then read it - one value must change
+#   cp config.example.yaml data/.config.yaml
+#   docker compose up -d
+#
+# Nothing in here talks to the internet once the images and the model are pulled.
+# The two ports the robot needs (8000, 8003) are the ONLY ones published to the
+# LAN; everything else is bound to 127.0.0.1 so it is reachable from this machine
+# and nowhere else.
+#
+# ⚠️ Assumes an NVIDIA GPU and the container toolkit. For CPU-only, comment out
+#    the `deploy:` block in the `ollama` service - it will work and it will be
+#    slow. See docs/quickstart.md for what "slow" means per model size.
+
+name: stackchan
+
+services:
+  # ---------------------------------------------------------------------------
+  # THE MODEL. Ollama by default because swapping models is one command and it is
+  # what most people already have; llama.cpp below is the faster path.
+  #
+  # Either way the server only needs an OpenAI-compatible base URL with working
+  # tool calls, so LM Studio, vLLM or a box down the hall are all valid - point
+  # `LLM.<entry>.base_url` in the config at whatever you like.
+  #
+  # 🔴 TOOL CALLING IS THE WHOLE POINT, and it is the first thing small models
+  #    lose. A model that chats beautifully and cannot call a tool makes this
+  #    robot a speaking clock. See docs/model-floor.md for measured results
+  #    rather than folklore.
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: stackchan-ollama
+    restart: unless-stopped
+    # localhost only. Publishing this to the LAN would hand an unauthenticated
+    # generate endpoint to everything on the network.
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    environment:
+      # Keep the model resident. The default evicts it after five idle minutes,
+      # which puts a multi-second reload in front of the first thing you say -
+      # indistinguishable, from the room, from the robot ignoring you.
+      - OLLAMA_KEEP_ALIVE=-1
+      # One request at a time. Concurrency does not create GPU throughput, it
+      # divides it: on the reference rig a memory summary overlapping a new
+      # conversation took both from 33 tok/s to 4.3 tok/s, which turned a wake
+      # word into thirty seconds of silence. Queueing is the correct behaviour
+      # for a device with exactly one user.
+      - OLLAMA_NUM_PARALLEL=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks: [stackchan]
+
+  # ---------------------------------------------------------------------------
+  # The faster path, off by default. Enable with COMPOSE_PROFILES=llamacpp in
+  # .env, and switch `selected_module.LLM` to LlamaCpp in the config.
+  #
+  # Worth it when you want the flags: measured 33-34 tok/s for a 32B Q4 on a
+  # 24 GB card, with quantised KV cache and flash attention. Costs you finding
+  # and downloading a GGUF yourself, which is the step people give up on - hence
+  # Ollama as the default rather than this.
+  # ---------------------------------------------------------------------------
+  llamacpp:
+    profiles: [llamacpp]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: stackchan-llamacpp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # ⚠️ NO COMMENTS INSIDE THIS BLOCK. `command: >` is a folded scalar, so every
+    #    line becomes literal text on the command line and a "#" line makes
+    #    compose reject the whole file. Explanations go above the key.
+    #
+    # --parallel 1: see OLLAMA_NUM_PARALLEL above, same reason.
+    # --jinja: required for tool calling. Without it the model's own chat
+    #   template is ignored and tool calls come back as prose the server cannot
+    #   parse, which looks like "the model is too small" and is not.
+    command: >
+      -m /models/${LLAMACPP_MODEL_FILE:-model.gguf}
+      --alias ${LLM_MODEL:-local-model}
+      --host 0.0.0.0 --port 8080
+      -ngl 99
+      -c 16384
+      --parallel 1
+      -fa on
+      -ctk q8_0 -ctv q8_0
+      --jinja
+      --reasoning off
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 180s
+    networks: [stackchan]
+
+  # ---------------------------------------------------------------------------
+  # SPEECH TO TEXT. CPU on purpose: the GPU is for the model, and taking VRAM
+  # from it costs tool-calling quality, which is the thing that matters most. A
+  # modern desktop CPU transcribes a few seconds of speech faster than the person
+  # finishes waiting for it.
+  #
+  # 🔴 AN ENGLISH-ONLY MODEL (.en), DELIBERATELY. The server's `openai` ASR
+  #    provider does not send a `language` parameter - it posts the audio and the
+  #    model name, nothing else. A multilingual Whisper therefore auto-detects
+  #    per utterance, and short utterances are exactly where that goes wrong:
+  #    "how's the weather" comes back as Japanese often enough to notice. An .en
+  #    model cannot drift, which removes the problem instead of configuring
+  #    around it. Change WHISPER_MODEL if you want another language - and expect
+  #    to have to say so in the persona too.
+  # ---------------------------------------------------------------------------
+  whisper:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    container_name: stackchan-whisper
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8010:8000"
+    environment:
+      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small.en}
+      - WHISPER__INFERENCE_DEVICE=cpu
+      - WHISPER__COMPUTE_TYPE=int8
+      # Keep it loaded, same reasoning as OLLAMA_KEEP_ALIVE.
+      - WHISPER__TTL=-1
+      - ENABLE_UI=false
+    volumes:
+      - whisper:/home/ubuntu/.cache/huggingface
+    networks: [stackchan]
+
+  # ---------------------------------------------------------------------------
+  # TEXT TO SPEECH. Also CPU, also small.
+  #
+  # 🔊 VOICE CHOICE IS A LOUDNESS DECISION on this hardware. The robot's amplifier
+  #    offers attenuation only - no gain anywhere - into a 1 W speaker, and
+  #    digital gain in the firmware makes him hear himself and abort mid-sentence
+  #    (there is no echo reference on the board). So a voice with more energy in
+  #    it is the only free loudness available. See docs/voice.md.
+  # ---------------------------------------------------------------------------
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    container_name: stackchan-kokoro
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8880:8880"
+    networks: [stackchan]
+
+  # ---------------------------------------------------------------------------
+  # THE PIPELINE: VAD -> ASR -> intent -> model -> TTS, plus the OTA endpoint the
+  # robot asks for its WebSocket address.
+  #
+  # Built rather than pulled: upstream's image speaks Chinese in places no prompt
+  # can reach, and carries two bugs worth fixing. See Dockerfile and patches/.
+  #
+  # 8000 and 8003 ARE published to the LAN - the robot has to reach them. On
+  # Windows/WSL2 that also needs mirrored networking and a Hyper-V firewall rule;
+  # docs/quickstart.md covers it, and it is the single most common reason a
+  # correctly-configured stack still cannot be reached.
+  # ---------------------------------------------------------------------------
+  xiaozhi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: stackchan-xiaozhi:english
+    container_name: stackchan-xiaozhi
+    restart: unless-stopped
+    depends_on:
+      whisper:
+        condition: service_started
+      kokoro:
+        condition: service_started
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      - TZ=${TZ:-UTC}
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:8000:8000"
+      - "${BIND_ADDR:-0.0.0.0}:8003:8003"
+    volumes:
+      # Your live config and its memory files. Gitignored: this is where an MCP
+      # token would end up if you add one.
+      - ./data:/opt/xiaozhi-esp32-server/data
+    networks: [stackchan]
+
+volumes:
+  ollama:
+  whisper:
+
+networks:
+  stackchan:
+    driver: bridge
