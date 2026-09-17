@@ -3,6 +3,8 @@
 #include <esp_log.h>
 #include <driver/i2c_master.h>
 #include <driver/i2s_tdm.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #define TAG "CoreS3AudioCodec"
 
@@ -256,6 +258,52 @@ void CoreS3AudioCodec::EnableOutput(bool enable) {
             // Wrong volume is a nuisance; a reboot loses the conversation.
             ESP_LOGW(TAG, "volume not set (%s) - audio still plays", esp_err_to_name(err));
         }
+        // 🔴 AN OPEN THAT RETURNS OK IS NOT PROOF THE AMPLIFIER IS LISTENING,
+        //    and believing it cost a silent robot.
+        //
+        //    This board shares one I2C bus between the PMIC, the PY32, the touch
+        //    controller, the camera's SCCB and both audio chips, and about ten
+        //    seconds into boot - as Wi-Fi associates and the wake-word engine
+        //    starts - it reliably NAKs for a few hundred milliseconds. Both the
+        //    amp (0x36) and the mic codec (0x40) go unreachable in that window.
+        //
+        //    esp_codec_dev_open reports success in that state. Its register
+        //    writes went nowhere, so the amp keeps whatever configuration it had
+        //    - which after a soft reset can be "muted" - and every later write is
+        //    accepted, decoded and played into a chip that is not listening.
+        //    From the room: he hears you, he answers on screen, and he is silent.
+        //
+        //    The reference robot only ever escaped this by luck. A boot chime
+        //    happened to play 20ms after the failure, retrying the open while the
+        //    bus was free. Remove that chime - as a build with a quieter boot
+        //    does - and the robot stays mute until someone power-cycles it.
+        //
+        //    So: ask the amp whether it is there, and recover if it is not.
+        if (!AmpResponds()) {
+            ESP_LOGW(TAG, "speaker opened but the amp does not answer - resetting it");
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
+            if (amp_reset_) {
+                amp_reset_();
+            }
+            vTaskDelay(pdMS_TO_TICKS(20));
+            err = esp_codec_dev_open(output_dev_, &fs);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "speaker reopen failed (%s) - staying closed", esp_err_to_name(err));
+                return;
+            }
+            if (!AmpResponds()) {
+                // Leave it CLOSED rather than pretending. The next playback
+                // retries, and the log says why this one did not work.
+                ESP_LOGE(TAG, "amp still silent after a reset - leaving the speaker closed");
+                ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
+                return;
+            }
+            ESP_LOGI(TAG, "amp recovered after reset");
+            err = esp_codec_dev_set_out_vol(output_dev_, output_volume_);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "volume not set after reset (%s)", esp_err_to_name(err));
+            }
+        }
         // AFTER the open, never before: esp_codec_dev_open re-runs aw88298_open,
         // which writes REG61 back to boost-disabled. Setting it earlier would be
         // silently undone.
@@ -288,6 +336,26 @@ void CoreS3AudioCodec::SetSpeakerBoost(bool enable) {
     }
     ESP_LOGI(TAG, "speaker boost %s (REG61=0x%04X) -> %s", enable ? "ON" : "off", value,
              DescribeAmp().c_str());
+}
+
+// One register read, retried a couple of times. REG0C always reads back
+// something on a live AW88298; an unreachable chip returns an error every time.
+//
+// Deliberately NOT a value check: what "correct" looks like depends on volume
+// and boost, and a wrong-looking value still proves the chip is talking - which
+// is the question being asked here.
+bool CoreS3AudioCodec::AmpResponds() {
+    if (out_ctrl_if_ == nullptr) {
+        return false;
+    }
+    for (int attempt = 0; attempt < 3; attempt++) {
+        uint8_t v[2] = {0, 0};
+        if (out_ctrl_if_->read_reg(out_ctrl_if_, 0x0C, 1, v, 2) == 0) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return false;
 }
 
 std::string CoreS3AudioCodec::DescribeAmp() {

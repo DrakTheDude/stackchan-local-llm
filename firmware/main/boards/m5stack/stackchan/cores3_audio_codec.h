@@ -6,6 +6,9 @@
 #include <esp_codec_dev.h>
 #include <esp_codec_dev_defaults.h>
 
+#include <functional>
+#include <string>
+
 class CoreS3AudioCodec : public AudioCodec {
 private:
     const audio_codec_data_if_t* data_if_ = nullptr;
@@ -56,10 +59,22 @@ public:
     // identical from across the room.
     std::string DescribeAmp();
 
+    // Does the amplifier answer on I2C at all? Used to tell a genuinely open
+    // output apart from one that opened while the amp was unreachable - see
+    // EnableOutput.
+    bool AmpResponds();
+
+    // How the board resets the amplifier. The AW88298's reset line is on a
+    // different chip (the AW9523 IO expander), which the codec does not own, so
+    // the board hands in a closure. Optional: without it, recovery is limited to
+    // closing and reopening.
+    void SetAmpResetHook(std::function<void()> cb) { amp_reset_ = std::move(cb); }
+
     // 🔴 There is deliberately NO digital output gain. It was tried, it made
     //    things worse rather than louder, and the reason is in Write().
 
 private:
+    std::function<void()> amp_reset_;
     // 🔴 OFF BY DEFAULT, and it was briefly true. Turning the boost on was
     //    MEASURED to change nothing audible - REG61 read back as 0x6673, so the
     //    write landed and simply does not move this speaker - and the popping

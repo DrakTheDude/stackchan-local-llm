@@ -1429,6 +1429,17 @@ public:
             AUDIO_CODEC_AW88298_ADDR,
             AUDIO_CODEC_ES7210_ADDR,
             AUDIO_INPUT_REFERENCE);
+        // The amplifier's reset line is on the AW9523, which the codec does not
+        // own - so it borrows it. Without this, a codec that opened while the
+        // amp was unreachable has no way back, and the robot stays silent until
+        // someone power-cycles it. See EnableOutput in cores3_audio_codec.cc.
+        static bool amp_reset_hooked = false;
+        if (!amp_reset_hooked) {
+            amp_reset_hooked = true;
+            audio_codec.SetAmpResetHook([this]() {
+                if (aw9523_ != nullptr) aw9523_->ResetAw88298();
+            });
+        }
         return &audio_codec;
     }
 
