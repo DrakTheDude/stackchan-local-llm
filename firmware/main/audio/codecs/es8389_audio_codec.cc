@@ -7,10 +7,10 @@ static const char TAG[] = "Es8389AudioCodec";
 Es8389AudioCodec::Es8389AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port, int input_sample_rate, int output_sample_rate,
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
     gpio_num_t pa_pin, uint8_t es8389_addr, bool use_mclk, int input_channels, int output_channels) {
-    duplex_ = true; // 是否双工
-    input_reference_ = false; // 是否使用参考输入，实现回声消除
-    input_channels_ = input_channels; // 输入通道数
-    output_channels_ = output_channels; // 输出通道数
+    duplex_ = true; // full duplex
+    input_reference_ = false; // use a reference input, for echo cancellation
+    input_channels_ = input_channels; // number of input channels
+    output_channels_ = output_channels; // number of output channels
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
     input_gain_ = 40;
@@ -171,7 +171,7 @@ void Es8389AudioCodec::EnableOutput(bool enable) {
     }
     if (enable) {
         if (!output_device_opened_) {
-            // 播放 16bit，声道数跟随 output_channels_
+            // Playback is 16-bit; the channel count follows output_channels_
             esp_codec_dev_sample_info_t fs = {
                 .bits_per_sample = 16,
                 .channel = (uint8_t)output_channels_,
@@ -213,8 +213,8 @@ int Es8389AudioCodec::Read(int16_t* dest, int samples) {
 int Es8389AudioCodec::Write(const int16_t* data, int samples) {
     if (output_enabled_) {
         if (output_channels_ > 1) {
-            // xiaozhi 全链路产出单声道 PCM；双声道输出时复制到 L/R 两路，
-            // 否则样本数不匹配会导致 I2S 欠载/杂音。
+            // The whole xiaozhi pipeline produces mono PCM. For stereo output, copy it to both L and R,
+            // otherwise the sample-count mismatch causes I2S underruns / noise.
             std::vector<int16_t> stereo(static_cast<size_t>(samples) * output_channels_);
             for (int i = 0; i < samples; ++i) {
                 for (int c = 0; c < output_channels_; ++c) {

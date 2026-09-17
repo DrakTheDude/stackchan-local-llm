@@ -35,7 +35,7 @@ enum AbortReason { kAbortReasonNone, kAbortReasonWakeWordDetected };
 enum ListeningMode {
     kListeningModeAutoStop,
     kListeningModeManualStop,
-    kListeningModeRealtime  // 需要 AEC 支持
+    kListeningModeRealtime  // requires AEC support
 };
 
 class Protocol {

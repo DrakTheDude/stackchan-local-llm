@@ -11,9 +11,9 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
                              gpio_num_t din, gpio_num_t pa_pin, uint8_t es8311_addr,
                              uint8_t es7210_addr, bool input_reference, float input_gain,
                              int reference_gain_channel, float reference_gain) {
-    duplex_ = true;                              // 是否双工
-    input_reference_ = input_reference;          // 是否使用参考输入，实现回声消除
-    input_channels_ = input_reference_ ? 2 : 1;  // 输入通道数
+    duplex_ = true;                              // full duplex
+    input_reference_ = input_reference;          // use a reference input, for echo cancellation
+    input_channels_ = input_reference_ ? 2 : 1;  // number of input channels
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
     input_gain_ = input_gain;

@@ -37,7 +37,7 @@ static __always_inline uint8_t expand_6_to_8(uint8_t v) {
 
 static uint8_t* convert_input_to_encoder_buf(const uint8_t* src, uint16_t width, uint16_t height, v4l2_pix_fmt_t format,
                                              jpeg_pixel_format_t* out_fmt, int* out_size) {
-    // GRAY 直接作为 JPEG_PIXEL_FORMAT_GRAY 输入
+    // GRAY goes in directly as JPEG_PIXEL_FORMAT_GRAY
     if (format == V4L2_PIX_FMT_GREY) {
         int sz = (int)width * (int)height;
         uint8_t* buf = (uint8_t*)jpeg_calloc_align(sz, 16);
@@ -51,7 +51,7 @@ static uint8_t* convert_input_to_encoder_buf(const uint8_t* src, uint16_t width,
         return buf;
     }
 
-    // V4L2 YUYV (Y Cb Y Cr) 可直接作为 JPEG_PIXEL_FORMAT_YCbYCr 输入
+    // V4L2 YUYV (Y Cb Y Cr) can go in directly as JPEG_PIXEL_FORMAT_YCbYCr
     if (format == V4L2_PIX_FMT_YUYV) {
         int sz = (int)width * (int)height * 2;
         uint8_t* buf = (uint8_t*)jpeg_calloc_align(sz, 16);
@@ -65,8 +65,8 @@ static uint8_t* convert_input_to_encoder_buf(const uint8_t* src, uint16_t width,
         return buf;
     }
 
-    // V4L2 UYVY (Cb Y Cr Y) -> 重排为 YUYV 再作为 YCbYCr 输入
-    // 当前版本暂时不会出现 UYVY 格式
+    // V4L2 UYVY (Cb Y Cr Y) -> reorder to YUYV, then input as YCbYCr
+    // UYVY does not occur in the current version
     if (format == V4L2_PIX_FMT_UYVY) [[unlikely]] {
         int sz = (int)width * (int)height * 2;
         const uint8_t* s = src;
@@ -90,8 +90,8 @@ static uint8_t* convert_input_to_encoder_buf(const uint8_t* src, uint16_t width,
         return buf;
     }
 
-    // V4L2 YUV422P (YUV422 Planar) -> 重排为 YUYV (YCbYCr)
-    // 当前版本暂时不会出现 YUV422P 格式
+    // V4L2 YUV422P (YUV422 Planar) -> reorder to YUYV (YCbYCr)
+    // YUV422P does not occur in the current version
     if (format == V4L2_PIX_FMT_YUV422P) [[unlikely]] {
         int sz = (int)width * (int)height * 2;
         const uint8_t* y_plane = src;
@@ -124,8 +124,8 @@ static uint8_t* convert_input_to_encoder_buf(const uint8_t* src, uint16_t width,
         return buf;
     }
 
-    // RGB 转换为 YUV422 (YCbYCr) 再输入
-    // 见 https://github.com/78/xiaozhi-esp32/issues/1380#issuecomment-3497156378
+    // RGB is converted to YUV422 (YCbYCr) before input
+    // see https://github.com/78/xiaozhi-esp32/issues/1380#issuecomment-3497156378
     else if (format == V4L2_PIX_FMT_RGB24 || format == V4L2_PIX_FMT_RGB565 || format == V4L2_PIX_FMT_RGB565X) {
         esp_imgfx_pixel_fmt_t in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB888;
         uint32_t src_len = 0;
@@ -138,7 +138,7 @@ static uint8_t* convert_input_to_encoder_buf(const uint8_t* src, uint16_t width,
                 in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE;
                 src_len = static_cast<uint32_t>(width * height * 2);
                 break;
-            [[unlikely]] case V4L2_PIX_FMT_RGB565X: // 当前版本暂时不会出现 RGB565X
+            [[unlikely]] case V4L2_PIX_FMT_RGB565X: // RGB565X does not occur in the current version
                 in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_BE;
                 src_len = static_cast<uint32_t>(width * height * 2);
                 break;
@@ -256,7 +256,7 @@ static uint8_t* convert_input_to_hw_encoder_buf(const uint8_t* src, uint16_t wid
     }
 
     if (format == V4L2_PIX_FMT_YUYV) {
-        // 硬件需要 | Y1 V Y0 U | 的“大端”格式，因此需要 bswap16
+        // the hardware expects the "big-endian" | Y1 V Y0 U | layout, hence bswap16
         int sz = (int)width * (int)height * 2;
         uint16_t* buf = (uint16_t*)malloc_psram(sz);
         if (!buf)
@@ -380,7 +380,7 @@ static bool encode_with_esp_new_jpeg(const uint8_t* src, size_t src_len, uint16_
         return false;
     }
 
-    // 估算输出缓冲区：宽高的 1.5 倍 + 64KB
+    // estimate the output buffer: 1.5 x width x height + 64 KB
     size_t out_cap = (size_t)width * (size_t)height * 3 / 2 + 64 * 1024;
     if (out_cap < 128 * 1024)
         out_cap = 128 * 1024;
@@ -405,7 +405,7 @@ static bool encode_with_esp_new_jpeg(const uint8_t* src, size_t src_len, uint16_
 
     if (cb) {
         cb(cb_arg, 0, outbuf, (size_t)out_len);
-        cb(cb_arg, 1, NULL, 0);  // 结束信号
+        cb(cb_arg, 1, NULL, 0);  // end-of-stream signal
         free(outbuf);
         if (jpg_out)
             *jpg_out = NULL;

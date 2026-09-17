@@ -8,14 +8,14 @@ PressToTalkMcpTool::PressToTalkMcpTool()
 }
 
 void PressToTalkMcpTool::Initialize() {
-    // 从设置中读取当前状态
+    // read the current state from settings
     Settings settings("vendor");
     press_to_talk_enabled_ = settings.GetInt("press_to_talk", 0) != 0;
 
-    // 注册MCP工具
+    // register the MCP tool
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddTool("self.set_press_to_talk",
-        "Switch between press to talk mode (长按说话) and click to talk mode (单击说话).\n"
+        "Switch between press to talk mode (hold the button to talk) and click to talk mode (click once to talk).\n"
         "The mode can be `press_to_talk` or `click_to_talk`.",
         PropertyList({
             Property("mode", kPropertyTypeString)

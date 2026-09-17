@@ -61,7 +61,7 @@ void Nt26Board::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 void Nt26Board::OnNetworkReadyTimeout(void* arg) {
     auto* self = static_cast<Nt26Board*>(arg);
     ESP_LOGW(TAG, "Network ready timeout");
-    self->OnNetworkEvent(NetworkEvent::ModemErrorTimeout, "网络连接超时");
+    self->OnNetworkEvent(NetworkEvent::ModemErrorTimeout, "Network connection timed out");
 }
 
 void Nt26Board::StartNetwork() {

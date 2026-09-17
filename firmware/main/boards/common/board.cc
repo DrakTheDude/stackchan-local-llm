@@ -23,17 +23,17 @@ Board::Board() {
 }
 
 std::string Board::GenerateUuid() {
-    // UUID v4 需要 16 字节的随机数据
+    // UUID v4 needs 16 bytes of random data
     uint8_t uuid[16];
     
-    // 使用 ESP32 的硬件随机数生成器
+    // use the ESP32 hardware random number generator
     esp_fill_random(uuid, sizeof(uuid));
     
-    // 设置版本 (版本 4) 和变体位
-    uuid[6] = (uuid[6] & 0x0F) | 0x40;    // 版本 4
-    uuid[8] = (uuid[8] & 0x3F) | 0x80;    // 变体 1
+    // set the version (version 4) and variant bits
+    uuid[6] = (uuid[6] & 0x0F) | 0x40;    // version 4
+    uuid[8] = (uuid[8] & 0x3F) | 0x80;    // variant 1
     
-    // 将字节转换为标准的 UUID 字符串格式
+    // convert the bytes to the standard UUID string format
     char uuid_str[37];
     snprintf(uuid_str, sizeof(uuid_str),
         "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",

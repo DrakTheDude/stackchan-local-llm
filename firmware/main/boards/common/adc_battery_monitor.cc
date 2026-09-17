@@ -27,7 +27,7 @@ AdcBatteryMonitor::AdcBatteryMonitor(adc_unit_t adc_unit, adc_channel_t adc_chan
         .lower_resistor = lower_resistor
     };
 
-    // 在ADC配置部分进行条件设置
+    // conditional setup in the ADC configuration
     if (charging_pin_ != GPIO_NUM_NC) {
         adc_cfg.charging_detect_cb = [](void *user_data) -> bool {
             AdcBatteryMonitor *self = (AdcBatteryMonitor *)user_data;
@@ -35,7 +35,7 @@ AdcBatteryMonitor::AdcBatteryMonitor(adc_unit_t adc_unit, adc_channel_t adc_chan
         };
         adc_cfg.charging_detect_user_data = this;
     } else {
-        // 不设置回调，让adc_battery_estimation库使用软件估算
+        // no callback, so the adc_battery_estimation library uses software estimation
         adc_cfg.charging_detect_cb = nullptr;
         adc_cfg.charging_detect_user_data = nullptr;
     }
@@ -66,7 +66,7 @@ AdcBatteryMonitor::~AdcBatteryMonitor() {
 }
 
 bool AdcBatteryMonitor::IsCharging() {
-    // 优先使用adc_battery_estimation库的功能
+    // prefer the adc_battery_estimation library
     if (adc_battery_estimation_handle_ != nullptr) {
         bool is_charging = false;
         esp_err_t err = adc_battery_estimation_get_charging_state(adc_battery_estimation_handle_, &is_charging);
@@ -75,7 +75,7 @@ bool AdcBatteryMonitor::IsCharging() {
         }
     }
     
-    // 回退到GPIO读取或返回默认值
+    // fall back to reading the GPIO, or return a default
     if (charging_pin_ != GPIO_NUM_NC) {
         return gpio_get_level(charging_pin_) == 1;
     }
@@ -88,7 +88,7 @@ bool AdcBatteryMonitor::IsDischarging() {
 }
 
 uint8_t AdcBatteryMonitor::GetBatteryLevel() {
-    // 如果句柄无效，返回默认值
+    // invalid handle: return a default
     if (adc_battery_estimation_handle_ == nullptr) {
         return 100;
     }
@@ -96,7 +96,7 @@ uint8_t AdcBatteryMonitor::GetBatteryLevel() {
     float capacity = 0;
     esp_err_t err = adc_battery_estimation_get_capacity(adc_battery_estimation_handle_, &capacity);
     if (err != ESP_OK) {
-        return 100; // 出错时返回默认值
+        return 100; // default on error
     }
     return (uint8_t)capacity;
 }

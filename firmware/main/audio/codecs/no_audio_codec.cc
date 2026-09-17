@@ -223,7 +223,7 @@ int NoAudioCodec::Write(const int16_t* data, int samples) {
     // volume_factor_: 0-65536
     int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
     for (int i = 0; i < samples; i++) {
-        int64_t temp = int64_t(data[i]) * volume_factor; // 使用 int64_t 进行乘法运算
+        int64_t temp = int64_t(data[i]) * volume_factor; // multiply in int64_t
         if (temp > INT32_MAX) {
             buffer[i] = INT32_MAX;
         } else if (temp < INT32_MIN) {
@@ -368,7 +368,7 @@ NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output
 int NoAudioCodecSimplexPdm::Read(int16_t* dest, int samples) {
     size_t bytes_read;
 
-    // PDM 解调后的数据位宽为 16 位，直接读取到目标缓冲区
+    // After PDM demodulation the data is 16 bits wide, so read it straight into the destination buffer
     if (i2s_channel_read(rx_handle_, dest, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY) != ESP_OK) {
         ESP_LOGE(TAG, "Read Failed!");
         return 0;

@@ -223,7 +223,7 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     debug_statistics_.input_count++;
 
 #if CONFIG_USE_AUDIO_DEBUGGER
-    // 音频调试：发送原始音频数据
+    // Audio debugging: send raw audio data
     if (audio_debugger_ == nullptr) {
         audio_debugger_ = std::make_unique<AudioDebugger>();
     }

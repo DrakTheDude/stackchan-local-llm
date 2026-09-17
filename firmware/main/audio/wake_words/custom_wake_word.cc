@@ -104,7 +104,7 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         return false;
     }
 
-    // 初始化 multinet (命令词识别)
+    // initialise multinet (command word recognition)
     mn_name_ = esp_srmodel_filter(models_, ESP_MN_PREFIX, language_.c_str());
     if (mn_name_ == nullptr) {
         ESP_LOGW(TAG, "Language '%s' multinet not found, falling back to any multinet model", language_.c_str());
