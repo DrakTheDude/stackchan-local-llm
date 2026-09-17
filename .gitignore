@@ -1,0 +1,29 @@
+# Credentials never belong in this repo - it is meant to be public.
+.env
+.env.*
+*.token
+*token*.txt
+*.pem
+*.key
+!*.ps1
+!*.sh
+!*.py
+
+# Firmware build output. Releases are published as GitHub release assets, never committed.
+# (firmware/ carries upstream's own .gitignore for its tree as well.)
+build/
+*.bin
+sdkconfig.old
+
+# Factory backups and NVS dumps contain Wi-Fi credentials. Keep them off this disk entirely.
+*backup*.bin
+*nvs*.bin
+
+# Local server state
+server/data/
+server/.env
+
+# Personal tooling
+.claude/settings.local.json
+.vscode/
+__pycache__/
