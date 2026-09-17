@@ -45,14 +45,19 @@ drafts, comments, examples, and test fixtures:
 | **language** | all firmware comments in English — **translate** upstream's Chinese, keep the reasoning. Don't strip comments |
 | **attribution** | "by Drax and Claude", built with Claude Code |
 | **upstream** | pinned on purpose. Bumping is a deliberate step, never a side effect |
+| **structure** | four pillars — firmware/platform, local AI stack, integration interface, reproducibility — plus verifiable privacy. See [docs/roadmap.md](docs/roadmap.md) |
+| **backends** | nothing model- or vendor-specific. The LLM is any OpenAI-compatible endpoint with tool calling; every pipeline stage is a setting |
+| **integration** | *proposed, not yet confirmed:* MCP as the contract, no new API |
+| **safety** | voice has no confirmation step — documented guidance is read-only tools by default, with an explicit allowlist for anything that acts |
 
 ## Layout
 
-| path | |
-|---|---|
-| `firmware/` | the xiaozhi-esp32 fork (subtree). Our board goes in `firmware/main/boards/m5stack/stackchan/` |
-| `server/` | docker compose, patch scripts, English config |
-| `docs/` | roadmap, and eventually the user-facing guides |
+| path | pillar | |
+|---|---|---|
+| `firmware/` | platform | the xiaozhi-esp32 fork (subtree). Our board goes in `firmware/main/boards/m5stack/stackchan/` |
+| `server/` | local AI stack | docker compose, patch scripts, English config |
+| `integrations/` | integration | *planned:* the status contract, reference status server, MCP examples |
+| `docs/` | reproducibility | roadmap now; quickstart, backup/restore, flashing, troubleshooting, variants, privacy checklist to come |
 
 ### Updating the upstream firmware base
 

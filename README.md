@@ -12,6 +12,17 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 > predecessor project; this repo is where it becomes something anyone can install. Follow along in
 > [docs/roadmap.md](docs/roadmap.md).
 
+## What it will be
+
+| | |
+|---|---|
+| **Firmware and platform** | English-first board support for the StackChan — face, head, LED ring, camera, on-device wake word — with every hardware assumption documented alongside a way to check it |
+| **Local AI stack** | wake word → speech-to-text → model → text-to-speech, each stage swappable. Bring any OpenAI-compatible model server that supports tool calling |
+| **Integration interface** | [MCP](https://modelcontextprotocol.io) as the contract: give the model your own tools (Home Assistant, anything with an MCP server), and let the robot show a status on its ring and screen |
+| **Reproducibility** | full English docs: firmware backup and restore, flashing, bring-up, troubleshooting, known board variants — and a path from a factory robot to a local one in about 30 minutes |
+
+Plus a checklist you can run yourself to **verify nothing leaves your network.**
+
 ## Why
 
 The StackChan's factory "AI agent" firmware sends your voice to a remote service, with an always-on

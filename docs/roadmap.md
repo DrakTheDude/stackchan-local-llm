@@ -5,59 +5,120 @@ install. No deadline — done properly beats done fast.
 
 Status key: ⬜ not started · 🟡 in progress · ✅ done
 
+The project is organised around **four pillars**, with privacy verification running through all of them.
+The **critical path** to a usable release is marked 🔑.
+
 ---
 
-## 1. Foundation 🟡
+## Foundation 🟡
 
 - ✅ Repository scaffold, project brief, publishability rule
 - ✅ Import upstream `xiaozhi-esp32` at `66bf9f7` as a squashed subtree under `firmware/` — tree hash
   verified identical to upstream (`b940d7e`)
-- ⬜ Translate upstream's Chinese firmware comments to English (~233 lines, 34 files — measured)
+- ✅ Name: `stackchan-local-llm`
+- ⬜ Translate upstream's Chinese firmware comments to English (~233 lines, 34 files — measured), as its
+  own commit
+
+---
+
+## 1. Firmware and platform ⬜
+
+English-first board support, with every hardware assumption written down next to how to check it.
+
 - ⬜ Port the StackChan board from the reference project, **with personal and homelab specifics removed
   as it comes in** — never committed first and cleaned later
+- ⬜ 🔑 **Server address configurable after flashing.** Today it's compiled in and upstream has no
+  on-device setting, so a prebuilt `.bin` can't know the owner's server. Likely a field on the Wi-Fi setup
+  page the robot already serves on first boot, stored in NVS, with the compiled value as a default. This
+  blocks prebuilt binaries and the 30-minute path. Strong upstream candidate.
+- ⬜ Behaviour, documented: face and expressions, head motion and the thinking pose, LED ring states,
+  camera (on-screen only), wake word ("Hi, Stack Chan" — runs on the robot, not the server)
+- ⬜ **Hardware assumptions, each with a way to verify it:** I²C device map, servo rail at `0x6F`, servo
+  IDs and per-unit calibration, LED chain order, camera sensor. Verified on one unit so far — say so.
+- ⬜ Board variants: a diagnostic mode that prints the I²C scan and rail / servo / codec checks, so a report
+  from a different unit can be compared against a known-good one
 
-## 2. Make it anyone's ⬜
+## 2. Local AI stack ⬜
 
-- ⬜ **Server address configurable after flashing.** The biggest technical item, and the one prebuilt
-  binaries depend on. Today the OTA URL is compiled in and upstream has no on-device setting, so a
-  downloaded `.bin` can't know the owner's server. Likely a field on the Wi-Fi setup page the robot already
-  serves on first boot, stored in NVS, with the compiled value only as a default. A good upstream candidate.
-- ⬜ Generic persona — a desk companion, not a homelab operator.
-- ⬜ **Optional** MCP health source: poll any MCP endpoint for a status and drive the LED ring and idle
-  screen from it. Off by default. The reference project's homelab integration becomes one example.
-- ⬜ Wake phrase: "Hi, Stack Chan" (`wn9l_histackchan_tts3`) — the robot's own name.
+Wake word → STT → model → TTS, with every backend a setting rather than a choice made for you.
 
-## 3. Server kit ⬜
+- ⬜ `docker compose` stack with each stage replaceable: VAD, STT, LLM, TTS
+- ⬜ **LLM: any OpenAI-compatible endpoint with tool calling.** Test and document at least llama.cpp,
+  Ollama and LM Studio, including each one's tool-calling template requirements.
+- ⬜ **Measure an honest model floor.** Only a 32B on a 24 GB GPU is verified, and tool calling is exactly
+  what small models get wrong. Test ~8B and ~14B on real tasks and publish the results, failures included.
+- ⬜ STT: English-only Whisper by default. The upstream provider never sends a language, so multilingual
+  models drift into other languages on short utterances — document it, or patch it.
+- ⬜ TTS: Kokoro by default. Voice choice documented as a **loudness** decision on a 1 W speaker, with the
+  measurement script.
+- ⬜ Server patch kit carried over, every replacement asserted: English pass (prompts, few-shot examples,
+  tool schemas, spoken fallbacks, memory summariser, sentence splitter) and upstream bug fixes
+- ⬜ Our own fully English, commented `config.yaml`, **privacy-relevant keys set explicitly** — config
+  merges over upstream defaults, and some of those defaults are cloud services
+- ⬜ Generic persona; local memory; a log glossary for the Chinese server logs
+- ⬜ CPU-only / non-NVIDIA notes, if anything is acceptably fast
 
-- ⬜ `docker compose` stack: llama.cpp + Whisper + Kokoro + xiaozhi, with the model as a setting
-- ⬜ Asserted patch scripts, carried over: the English pass (prompts, few-shot examples, tool schemas,
-  spoken fallbacks, memory summariser, sentence splitter) and the upstream bug fixes
-- ⬜ Our own fully English, commented `config.yaml` — with the privacy-relevant keys set explicitly
-- ⬜ Log glossary: the server logs in Chinese; document the lines that matter
-- ⬜ **Measure an honest hardware floor.** Only a 32B model on a 24 GB GPU has been verified, and tool
-  calling is exactly what small models get wrong. Test 14B and 8B before stating a minimum.
-- ⬜ Non-NVIDIA / CPU-only notes, if anything works acceptably
+## 3. Integration interface ⬜
 
-## 4. Safe to flash ⬜
+**Proposed: MCP is the contract — no new API.** The server already mounts any MCP server as tools for the
+model, Home Assistant ships an official MCP server, and the reference project proved the path end to end.
 
-- ⬜ Factory firmware backup as the **first** step, and the restore path
-- ⬜ Brick recovery
-- ⬜ Plain statement of what was verified, and on how many units. Servo calibration is known to be per-unit.
-- ⬜ Hardware revision notes as reports come in
+- ⬜ **Tools for the model:** how to add an MCP server (stdio / SSE / streamable HTTP), with worked
+  examples — Home Assistant, a notes or files server, a custom one
+- ⬜ **Ambient status contract:** the small tool shape the robot polls to drive its ring, idle screen and
+  spoken alerts — e.g. a level (`ok` / `warn` / `alert`), a one-line summary, optional cards. Off by default.
+- ⬜ **Reference status server** — a few dozen lines, so the ring and idle screen can be tried with no
+  homelab. The reference project's homelab integration becomes one example, not a requirement.
+- ⬜ **The robot's own tools**, documented as an API: head, LED ring, camera, test hooks
+- ⬜ 🔴 **Safety guidance.** Voice has no confirmation step, and speech recognition mishears. Recommend
+  read-only tools by default and an explicit allowlist for anything that changes the world — a misheard
+  sentence must not be able to unlock a door.
 
-## 5. Release ⬜
+## 4. Reproducibility ⬜
 
-- ⬜ Automated firmware builds (app + assets) and versioned releases
-- ⬜ License (MIT), with upstream notices preserved
-- ⬜ Quickstart: flash → start server → "Hi, Stack Chan"
-- ⬜ Make the repo public
+Full English docs, and a path from a factory device to a local robot in about 30 minutes.
 
-## 6. Upstream ⬜
+- ⬜ 🔑 **Quickstart: factory device → local robot in ~30 minutes.** Conditions stated up front: excludes the
+  model download (a 32B is ~20 GB), assumes Docker is installed, defaults to a smaller model.
+- ⬜ 🔑 **Factory firmware backup as the first step**, verified, plus the restore path. Backups contain Wi-Fi
+  credentials — say where *not* to keep them.
+- ⬜ Flashing on Windows / macOS / Linux. Investigate a **browser flasher** (ESP Web Tools on GitHub Pages)
+  so owners can flash from the Releases page without installing anything.
+- ⬜ Building from source: ESP-IDF version, the `SDKCONFIG_DEFAULTS` requirement, pre-flash checks
+- ⬜ Hardware bring-up guide
+- ⬜ Troubleshooting: symptom → cause → fix, generalised from the reference project
+- ⬜ Known board variants, maintained from reports
+- ⬜ Automated firmware builds and versioned releases (app + assets)
+- ⬜ License (MIT) with upstream notices preserved; "by Drax and Claude, built with Claude Code"
+
+## Privacy you can verify ⬜
+
+The reason the project exists, so it gets a page of its own rather than a promise.
+
+- ⬜ A checklist an owner can run themselves: scan the firmware for URLs, confirm the cloud vision path is
+  disabled, confirm the server's built-in plugin allowlist is empty, confirm memory summarisation is local,
+  read the patch assertions
+- ⬜ What the factory firmware sends, and where, as far as can be established
+
+## Upstream ⬜
 
 - ⬜ `xiaozhi-esp32-server`: the TTS sentence splitter missing the ASCII full stop; `.rstrip()` eating the
-  spaces between streamed chunks. Both are plain bugs with measured reproductions.
+  spaces between streamed chunks. Both have measured reproductions.
 - ⬜ `xiaozhi-esp32`: the StackChan board; a runtime-configurable server address
 - ⬜ Possibly: English logging / i18n for the server
+
+## Release ⬜
+
+- ⬜ Private GitHub repo while the port is in progress
+- ⬜ Public once the quickstart works end to end on a factory unit
+
+---
+
+## Suggested order
+
+Foundation → board port → 🔑 runtime server address → compose stack with swappable backends → model floor →
+integration contract and reference server → 🔑 quickstart with backup/restore → privacy checklist → public
+release. Upstream PRs whenever a piece is solid.
 
 ---
 
@@ -66,8 +127,10 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 - ✅ **Public repo name: `stackchan-local-llm`.** "Stack-chan" is, as far as we know, the name of the
   original open-source robot project by Shinya Ishikawa that M5Stack's product builds on, so a bare
   `stackchan` could read as the official one. This says what the project is and can't be mistaken for it.
-- **License copyright holder.** MIT needs a named holder; attribution ("by Drax and Claude, built with
-  Claude Code") can say more than the copyright line.
+- **Integration contract.** MCP is proposed. Confirm before building on it.
+- **License copyright holder.** MIT needs a named holder; attribution can say more than the copyright line.
 - **Other upstream boards.** `firmware/main/boards` is ~3.5 MB of boards that aren't StackChan. Pruning
   shrinks the fork but makes every upstream merge conflict-prone. Keep for now.
 - **Upstream base.** `66bf9f7` is six weeks behind upstream. Bump before release, or after the port works?
+- **Browser flasher.** Can ESP Web Tools take the factory backup first? If not, the quickstart needs a
+  second tool for that step.
