@@ -10,7 +10,8 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 ## 1. Foundation 🟡
 
 - ✅ Repository scaffold, project brief, publishability rule
-- 🟡 Import upstream `xiaozhi-esp32` at `66bf9f7` as a squashed subtree under `firmware/`
+- ✅ Import upstream `xiaozhi-esp32` at `66bf9f7` as a squashed subtree under `firmware/` — tree hash
+  verified identical to upstream (`b940d7e`)
 - ⬜ Translate upstream's Chinese firmware comments to English (~233 lines, 34 files — measured)
 - ⬜ Port the StackChan board from the reference project, **with personal and homelab specifics removed
   as it comes in** — never committed first and cleaned later
