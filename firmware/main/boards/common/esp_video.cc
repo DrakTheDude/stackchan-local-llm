@@ -740,7 +740,8 @@ bool EspVideo::Capture() {
     }
 
     // show the preview image
-    auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
+    auto display = auto_preview_ ? dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay())
+                                 : nullptr;
     if (display != nullptr) {
         if (!frame_.data) {
             ESP_LOGE(TAG, "frame.data is null");

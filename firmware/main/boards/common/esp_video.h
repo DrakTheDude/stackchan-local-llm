@@ -42,6 +42,7 @@ private:
     std::string explain_url_;
     std::string explain_token_;
     std::thread encoder_thread_;
+    bool auto_preview_ = true;
 
 public:
     EspVideo(const esp_video_init_config_t& config);
@@ -53,4 +54,28 @@ public:
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;
     virtual std::string Explain(const std::string& question);
+
+    // Read-only access to the last captured frame.
+    //
+    // Added for the StackChan board so a photo can be shown on the device's own
+    // screen without Explain(), which posts the image to a vision endpoint. On
+    // this project that endpoint is a CLOUD vision API - the shipped default
+    // still carries the placeholder key - and sending frames from a camera
+    // pointed at the room off the LAN is exactly what this build exists to
+    // prevent. Capture() plus these accessors keep it entirely local.
+    const uint8_t* frame_data() const { return frame_.data; }
+    size_t frame_len() const { return frame_.len; }
+    uint16_t frame_width() const { return frame_.width; }
+    uint16_t frame_height() const { return frame_.height; }
+    v4l2_pix_fmt_t frame_format() const { return frame_.format; }
+
+    // Capture() normally pushes its own preview to the display: it converts the
+    // frame with esp_imgfx and hands the result straight to SetPreviewImage().
+    // Turn that off and the caller owns the preview instead.
+    //
+    // StackChan turns it off because the built-in conversion is a call into a
+    // binary blob whose YUV range convention is not inspectable, and the levels
+    // it produced were visibly wrong - see the colour note in the board file.
+    // Owning the conversion is what makes those levels fixable at all.
+    void SetAutoPreview(bool on) { auto_preview_ = on; }
 };
