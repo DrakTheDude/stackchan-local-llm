@@ -1,0 +1,70 @@
+# M5Stack StackChan - build defaults.
+#
+# 🔴 ALWAYS BUILD WITH THIS FILE ON THE DEFAULTS LIST:
+#
+#      idf.py -DIDF_TARGET=esp32s3 \
+#             -DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.stackchan;sdkconfig.defaults.local' \
+#             reconfigure
+#
+#    Board defaults are NOT picked up automatically. Without this file a fresh
+#    sdkconfig is generated from sdkconfig.defaults alone - a different board -
+#    and the build still reports success. Check before every flash:
+#
+#      grep CONFIG_BOARD_TYPE_M5STACK_STACKCHAN=y sdkconfig
+#
+# `sdkconfig.defaults.local` is where YOUR settings go - above all the server
+# address below. It is gitignored and optional; see the OTA_URL note.
+
+CONFIG_BOARD_TYPE_M5STACK_STACKCHAN=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_CAMERA_GC0308=y
+CONFIG_CAMERA_GC0308_AUTO_DETECT_DVP_INTERFACE_SENSOR=y
+CONFIG_CAMERA_GC0308_DVP_YUV422_320X240_20FPS=y
+CONFIG_LANGUAGE_EN_US=y
+
+# The server address the robot asks for its voice session.
+#
+# 🔴 A PLACEHOLDER, ON PURPOSE. `.invalid` is a reserved top-level domain that
+#    can never resolve, so a build that forgets to set this fails to connect -
+#    it never reaches anyone. Put your real address in the gitignored
+#    sdkconfig.defaults.local:
+#
+#      CONFIG_OTA_URL="http://<your-server>:8003/xiaozhi/ota/"
+#
+#    Setting it after flashing, without a rebuild, is planned - see
+#    docs/roadmap.md.
+CONFIG_OTA_URL="http://stackchan-server.invalid:8003/xiaozhi/ota/"
+
+# One scrolling caption line, not a wrapped block.
+#
+# Multiline text grows UPWARD and took 40% of a 2" screen, pushing the face into
+# the top third. The screen is a face, not a transcript: the caption is for
+# glancing at while he speaks. The real fix for "too fast to read" was a slower
+# scroll, which the board's face sets itself.
+# CONFIG_USE_MULTILINE_CHAT_MESSAGE is not set
+
+# Wake word: "Hi, Stack Chan" - a model trained on this robot's own name.
+#
+# 🔴 THE WAKE WORD IS ALSO THE MODEL'S FIRST USER MESSAGE.
+#    CONFIG_SEND_WAKE_WORD_DATA hands the phrase to the server as if it had been
+#    spoken. A wake word that is another assistant's name therefore opens every
+#    conversation with someone calling the robot by the wrong name - and it will
+#    comment on it. Choose a phrase for what it says to the model, not only for
+#    how well it triggers.
+#
+# 🔴 THESE LINES ARE A SET. esp-sr packs EVERY enabled SR_WN_* model into the
+#    assets partition and the runtime takes the first it finds, so a leftover
+#    enable leaves it to enumeration order which phrase answers. Keep exactly
+#    one enabled.
+#
+# ⚠️ CHANGING THIS NEEDS THE ASSETS PARTITION REFLASHED. The model lives in
+#    generated_assets.bin, and its build rule does not depend on this setting:
+#    delete build/generated_assets.bin to force a rebuild, then flash the assets
+#    partition as well as the app.
+#
+# A trained model rather than USE_CUSTOM_WAKE_WORD: custom phrases run through
+# MultiNet, a command recogniser doing wake-word duty - more misses, more false
+# triggers, more CPU, always on beside the audio pipeline.
+# CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS is not set
+# CONFIG_SR_WN_WN9_JARVIS_TTS is not set
+CONFIG_SR_WN_WN9L_HISTACKCHAN_TTS3=y

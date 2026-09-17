@@ -15,6 +15,9 @@ build/
 *.bin
 sdkconfig.old
 
+# Your own build settings - above all your server's address. Never public.
+sdkconfig.defaults.local
+
 # Factory backups and NVS dumps contain Wi-Fi credentials. Keep them off this disk entirely.
 *backup*.bin
 *nvs*.bin

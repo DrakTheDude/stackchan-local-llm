@@ -1,0 +1,1505 @@
+#include "stackchan_head.h"
+#include "stackchan_leds.h"
+#include "stacky_face.h"
+#include "status_source.h"
+#include "wifi_board.h"
+#include "cores3_audio_codec.h"
+#include "display/lcd_display.h"
+#include "application.h"
+#include "config.h"
+#include "power_save_timer.h"
+#include "settings.h"
+#include "i2c_device.h"
+#include "axp2101.h"
+#include "assets/lang_config.h"
+
+#include <esp_log.h>
+#include <esp_heap_caps.h>
+#include <cmath>
+#include <cstring>
+#include <driver/gpio.h>
+#include <driver/i2c_master.h>
+#include <esp_lcd_panel_io.h>
+#include <esp_lcd_panel_ops.h>
+#include <esp_lcd_ili9341.h>
+#include <esp_timer.h>
+#include "esp_video.h"
+#include "mcp_server.h"
+#include "lvgl_display/lvgl_image.h"
+#include "lvgl_display/lvgl_theme.h"
+// NOTE: do NOT include <linux/videodev2.h> here. esp_video.h already pulls in
+// the managed component's copy, and including it again redefines every
+// V4L2_PIX_FMT_* constant - which is a hard error under -Werror.
+
+#define TAG "M5StackStackChanBoard"
+
+class Pmic : public Axp2101 {
+public:
+    // Power Init
+    Pmic(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : Axp2101(i2c_bus, addr) {
+        uint8_t data = ReadReg(0x90);
+        data |= 0b10110100;
+        WriteReg(0x90, data);
+        WriteReg(0x99, (0b11110 - 5));
+        WriteReg(0x97, (0b11110 - 2));
+        WriteReg(0x69, 0b00110101);
+        WriteReg(0x30, 0b111111);
+        WriteReg(0x90, 0xBF);
+        WriteReg(0x94, 33 - 5);
+        WriteReg(0x95, 33 - 5);
+    }
+
+    void SetBrightness(uint8_t brightness) {
+        brightness = ((brightness + 641) >> 5);
+        WriteReg(0x99, brightness);
+    }
+};
+
+class CustomBacklight : public Backlight {
+public:
+    CustomBacklight(Pmic *pmic) : pmic_(pmic) {}
+
+    void SetBrightnessImpl(uint8_t brightness) override {
+        pmic_->SetBrightness(target_brightness_);
+        brightness_ = target_brightness_;
+    }
+
+private:
+    Pmic *pmic_;
+};
+
+class Aw9523 : public I2cDevice {
+public:
+    // Exanpd IO Init
+    Aw9523(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr) {
+        WriteReg(0x02, 0b00000111);  // P0
+        WriteReg(0x03, 0b10001111);  // P1
+        WriteReg(0x04, 0b00011000);  // CONFIG_P0
+        WriteReg(0x05, 0b00001100);  // CONFIG_P1
+        WriteReg(0x11, 0b00010000);  // GCR P0 port is Push-Pull mode.
+        WriteReg(0x12, 0b11111111);  // LEDMODE_P0
+        WriteReg(0x13, 0b11111111);  // LEDMODE_P1
+    }
+
+    void ResetAw88298() {
+        ESP_LOGI(TAG, "Reset AW88298");
+        WriteReg(0x02, 0b00000011);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        WriteReg(0x02, 0b00000111);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    void ResetIli9342() {
+        ESP_LOGI(TAG, "Reset IlI9342");
+        WriteReg(0x03, 0b10000001);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        WriteReg(0x03, 0b10000011);
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+};
+
+class Ft6336 : public I2cDevice {
+public:
+    struct TouchPoint_t {
+        int num = 0;
+        int x = -1;
+        int y = -1;
+    };
+    
+    Ft6336(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr) {
+        uint8_t chip_id = ReadReg(0xA3);
+        ESP_LOGI(TAG, "Get chip ID: 0x%02X", chip_id);
+        read_buffer_ = new uint8_t[6];
+    }
+
+    ~Ft6336() {
+        delete[] read_buffer_;
+    }
+
+    void UpdateTouchPoint() {
+        ReadRegs(0x02, read_buffer_, 6);
+        tp_.num = read_buffer_[0] & 0x0F;
+        tp_.x = ((read_buffer_[1] & 0x0F) << 8) | read_buffer_[2];
+        tp_.y = ((read_buffer_[3] & 0x0F) << 8) | read_buffer_[4];
+    }
+
+    inline const TouchPoint_t& GetTouchPoint() {
+        return tp_;
+    }
+
+private:
+    uint8_t* read_buffer_ = nullptr;
+    TouchPoint_t tp_;
+};
+
+// 🧪 Ask the GC0308 what its auto-exposure actually settled on.
+//
+// The frame comes back at mean luma 29 out of 255 with nothing anywhere near
+// clipping, in a lit room, with a clean lens. The sensor has enormous headroom
+// it is not using, so the question is whether its AEC is running and out of
+// range, or not running at all. Nothing in the driver's V4L2 surface answers
+// that - it exposes HFLIP and VFLIP and nothing else - but the sensor is on the
+// SAME I2C BUS this board already owns, at SCCB address 0x21, because we pass
+// our own bus handle in with init_sccb = false. So we can just ask it.
+//
+// WHAT IT SAID, and why this namespace now writes as well as reads:
+//
+//   exp=480  gain=0x14  aec=0x90(on)  targ=72  HB=0x32 VB=0x0C   -> mean 30
+//
+// The AEC is ON and has been the whole time. Its target is 72 and it delivers
+// 30, so it is not broken, it is CLAMPED - and exposure at 480 rows against a
+// frame of roughly 488+VB(12) is pinned at very nearly the whole frame. There
+// is no exposure left to give at 20fps.
+//
+// 🔴 SO STOP ASKING FOR 20fps. A still photo does not need a frame rate. For the
+//    duration of one shot the sensor is taken off auto, given a much longer
+//    frame to expose into, metered against the frame we actually get, and then
+//    put back exactly as it was. This is a real exposure - light collected on
+//    the sensor - as opposed to the tone curve further down, which can only
+//    stretch what already arrived and turns noise into a milky grey when asked
+//    to do too much. That was the "bleached out" picture.
+//
+// 🔴 EVERY WRITE IS RESTORED, ON EVERY PATH. The driver believes it owns this
+//    sensor; we are borrowing it between frames. Leaving the AEC off or the
+//    frame length stretched would break the next photo and every preview after
+//    it, in a way that would look like a fresh bug rather than this one.
+//
+// 🔴 AND IT ALL FAILS SOFT. I2cDevice would be the natural way to talk to 0x21
+//    and it is the wrong one: its constructor is
+//    ESP_ERROR_CHECK(i2c_master_bus_add_device) and 0x21 is already registered
+//    by the SCCB driver, so a duplicate-address rejection would abort and reboot
+//    the robot. That is the exact failure class already fixed twice here. If the
+//    bus will not give us the sensor, the photo still happens, just as it did
+//    before any of this existed.
+namespace gc0308 {
+
+constexpr uint8_t kAddr = 0x21;
+// The AEC drives towards 72 and the sensor's own metering happens before its
+// output gamma, so aiming a little higher on the OUTPUT is not greed.
+constexpr int kAimMean = 105;
+constexpr int kExpMax = 4000;    // 0x03/0x04 is 12 bits
+constexpr uint8_t kLongFrame = 0xFF;   // vertical blanking, i.e. exposure headroom
+// Exposure cannot exceed the frame, and the frame is the sensor window (488
+// rows) plus vertical blanking. VB is 8 bits and already maxed, so this is
+// genuinely all the exposure there is - which is what sent us looking for gain.
+constexpr int kExpCeil = 740;
+
+// 🔴 0x50 IS THE GLOBAL GAIN, and that was measured rather than looked up.
+//
+//    gc0308_regs.h names seven registers and none of them is a gain, so a
+//    one-shot sweep raised each plausible candidate in turn and reported what
+//    happened to the mean. Against a baseline of 62:
+//
+//        0x50 -> 81      0x53-0x56 -> 83
+//        0x70 -> 57      0x71      -> 54
+//        0x72 -> 50      0xb1-0xb3 -> 51
+//
+//    Two levers, four red herrings. 0x50 is the one used here because it is a
+//    single register with a single meaning; 0x53-0x56 move together and look
+//    like per-channel trims, which is a colour risk for the same brightness.
+//
+//    ⚠️ THE RESPONSE IS SUBLINEAR - 0x14 to 0x60 is 4.8x on the register and
+//       1.3x on the picture - so gain is driven in STEPS with the result
+//       measured each time, never by a formula. Assuming it was linear would
+//       overshoot wildly on the first correction.
+constexpr uint8_t kGainReg = 0x50;
+constexpr uint8_t kGainMax = 0x60;   // the value the sweep actually exercised
+constexpr uint8_t kGainStep = 0x18;
+
+i2c_master_dev_handle_t Dev(i2c_master_bus_handle_t bus) {
+    static i2c_master_dev_handle_t dev = nullptr;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+        i2c_device_config_t cfg = {};
+        cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        cfg.device_address = kAddr;
+        cfg.scl_speed_hz = 100 * 1000;   // matches the SCCB config in InitializeCamera
+        const esp_err_t err = i2c_master_bus_add_device(bus, &cfg, &dev);
+        if (err != ESP_OK) {
+            dev = nullptr;
+            ESP_LOGW(TAG, "sensor access unavailable: %s", esp_err_to_name(err));
+        }
+    }
+    return dev;
+}
+
+int Rd(i2c_master_dev_handle_t dev, uint8_t reg) {
+    uint8_t v = 0;
+    if (dev == nullptr) return -1;
+    if (i2c_master_transmit_receive(dev, &reg, 1, &v, 1, 100) != ESP_OK) return -1;
+    return v;
+}
+
+void Wr(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t val) {
+    if (dev == nullptr) return;
+    uint8_t b[2] = {reg, val};
+    i2c_master_transmit(dev, b, 2, 100);
+}
+
+// What we borrowed, so it can be handed back. `held` is false when the sensor
+// was unreachable, in which case nothing was changed and nothing needs undoing.
+struct Borrowed {
+    bool held = false;
+    int aec_mode = -1, vb = -1, exp_h = -1, exp_l = -1, gain = -1;
+};
+
+Borrowed BeginStill(i2c_master_bus_handle_t bus) {
+    Borrowed b;
+    auto* dev = Dev(bus);
+    if (dev == nullptr) return b;
+    // Only page 0 is touched, and only after confirming we are on it - the
+    // register numbers below mean something entirely different on page 1.
+    if (Rd(dev, 0xfe) != 0x00) return b;
+    b.aec_mode = Rd(dev, 0xd2);
+    b.vb = Rd(dev, 0x02);
+    b.exp_h = Rd(dev, 0x03);
+    b.exp_l = Rd(dev, 0x04);
+    b.gain = Rd(dev, kGainReg);
+    if (b.aec_mode < 0 || b.vb < 0 || b.exp_h < 0 || b.exp_l < 0 || b.gain < 0) return b;
+    b.held = true;
+    Wr(dev, 0xd2, static_cast<uint8_t>(b.aec_mode & ~0x80));   // AEC off, we drive
+    Wr(dev, 0x02, kLongFrame);                                 // room to expose into
+    return b;
+}
+
+void SetExposure(i2c_master_bus_handle_t bus, int rows) {
+    auto* dev = Dev(bus);
+    if (rows < 16) rows = 16;
+    if (rows > kExpMax) rows = kExpMax;
+    Wr(dev, 0x03, static_cast<uint8_t>((rows >> 8) & 0x0F));
+    Wr(dev, 0x04, static_cast<uint8_t>(rows & 0xFF));
+}
+
+void SetGain(i2c_master_bus_handle_t bus, int g) {
+    if (g < 0) g = 0;
+    if (g > kGainMax) g = kGainMax;
+    Wr(Dev(bus), kGainReg, static_cast<uint8_t>(g));
+}
+
+void EndStill(i2c_master_bus_handle_t bus, const Borrowed& b) {
+    if (!b.held) return;
+    auto* dev = Dev(bus);
+    Wr(dev, kGainReg, static_cast<uint8_t>(b.gain));
+    Wr(dev, 0x03, static_cast<uint8_t>(b.exp_h));
+    Wr(dev, 0x04, static_cast<uint8_t>(b.exp_l));
+    Wr(dev, 0x02, static_cast<uint8_t>(b.vb));
+    Wr(dev, 0xd2, static_cast<uint8_t>(b.aec_mode));   // AEC back on, last
+}
+
+std::string Describe(i2c_master_bus_handle_t bus) {
+    auto* dev = Dev(bus);
+    if (dev == nullptr) return "sensor unreadable";
+
+    auto rd = [dev](uint8_t reg) -> int { return Rd(dev, reg); };
+
+    const int page = rd(0xfe);
+    const int id = rd(0x00);
+    const int hb = rd(0x01);      // horizontal blanking - sets the row time
+    const int vb = rd(0x02);      // vertical blanking - sets the frame time, and
+                                  // the frame time is the exposure CEILING
+    const int exp_h = rd(0x03);
+    const int exp_l = rd(0x04);
+    const int gain = rd(0x50);    // global gain
+    const int aec_mode = rd(0xd2);  // bit 7 is the AEC enable
+    const int aec_targ = rd(0xd3);  // target luma the AEC drives towards
+    const int aec_win = rd(0xec);
+
+    char buf[200];
+    snprintf(buf, sizeof(buf),
+             "page=0x%02X id=0x%02X exp=%d gain=0x%02X aec=0x%02X(%s) targ=%d win=0x%02X "
+             "HB=0x%02X VB=0x%02X",
+             page, id, (exp_h < 0 || exp_l < 0) ? -1 : ((exp_h << 8) | exp_l), gain, aec_mode,
+             (aec_mode > 0 && (aec_mode & 0x80)) ? "on" : "OFF", aec_targ, aec_win, hb, vb);
+    ESP_LOGI(TAG, "sensor: %s", buf);
+    return buf;
+}
+
+}  // namespace gc0308
+
+// 📷 Packed YUV422 -> RGB565, done here rather than by esp_imgfx.
+//
+// The GC0308 hands us YUV422 and the panel wants RGB565, so something has to
+// convert. EspVideo::Capture() will do it with esp_imgfx_color_convert(), and
+// the first photos off this robot came back through that path washed out and
+// tinted - a dim room rendered as a uniformly bright cyan rectangle.
+//
+// esp_image_effects ships as a prebuilt .a, so its YUV range convention cannot
+// be read. Fifty lines of arithmetic we own beats a blob we cannot inspect when
+// the complaint is precisely about levels: this uses FULL-RANGE BT.601 (JFIF),
+// which is what a sensor emits. Applying the studio-swing 16..235 expansion to
+// full-range data is the classic way to produce exactly the crushed blacks and
+// blown highlights that were on the screen.
+//
+// 🔴 WHICH BYTE IS LUMA IS MEASURED, NOT ASSUMED.
+//
+//    Packed YUV422 comes in two interleavings and they differ only by a
+//    one-byte phase:
+//
+//        UYVY   U0 Y0 V0 Y1      luma on ODD bytes
+//        YUYV   Y0 U0 Y1 V0      luma on EVEN bytes
+//
+//    Get it backwards and luma comes from the chroma samples - which sit near
+//    128 in any low-saturation scene - so the picture is uniformly mid-bright
+//    no matter how dark the room, while the real luma drives chroma and paints
+//    the whole thing one colour. That is a precise description of the first
+//    photo, and this sensor is running a SUBSAMPLED mode where a phase slip is
+//    entirely plausible.
+//
+//    Rather than guess which of the two it is, measure: luma has far more
+//    spatial variance than chroma in any real scene. Pick the stream with the
+//    higher variance and log the choice next to the format the driver claims.
+//    A wrong pick is only possible when the two are indistinguishable, i.e.
+//    when the frame is flat - and then it does not matter what we picked.
+namespace yuv422 {
+
+// 16.16 fixed point, full-range BT.601.
+constexpr int kRv = 91881;    //  1.402
+constexpr int kGu = 22554;    // -0.344136
+constexpr int kGv = 46802;    // -0.714136
+constexpr int kBu = 116130;   //  1.772
+
+inline uint8_t Clamp(int v) {
+    return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+}
+
+// Spatial activity of one interleaved stream: |b[i] - b[i+4]|, i.e. this
+// channel's sample in one 2-pixel group against the same channel's sample in
+// the next. Both phases therefore sample one byte per group, so the two numbers
+// are directly comparable.
+//
+// Whichever phase is luma wins, and not marginally: chroma is what 4:2:2
+// throws away precisely because it carries far less high-frequency detail than
+// luma. Comparing bytes 2 apart instead would put U against V, which is a
+// measure of saturation rather than of detail - a strongly coloured wall would
+// then read as "busy" and could outvote a smooth luma gradient.
+static uint32_t StreamActivity(const uint8_t* p, size_t len, int phase) {
+    uint32_t sum = 0;
+    for (size_t i = phase; i + 4 < len; i += 4) {
+        const int d = static_cast<int>(p[i]) - static_cast<int>(p[i + 4]);
+        sum += static_cast<uint32_t>(d < 0 ? -d : d);
+    }
+    return sum;
+}
+
+// Even bytes carry luma in YUYV, odd bytes in UYVY. Measured, per the note above.
+static bool LumaEven(const uint8_t* p, size_t len) {
+    return StreamActivity(p, len, 0) >= StreamActivity(p, len, 1);
+}
+
+// Mean luma of a packed YUV422 frame, or -1 if it is not one. This is the
+// METER: the exposure loop drives the sensor until this number is where we want
+// it, which is the whole difference between collecting light and amplifying the
+// dark afterwards.
+static int MeanLuma(const uint8_t* src, size_t len, v4l2_pix_fmt_t fmt) {
+    if (src == nullptr || len < 8) return -1;
+    if (fmt != V4L2_PIX_FMT_YUYV && fmt != V4L2_PIX_FMT_UYVY) return -1;
+    const size_t off = LumaEven(src, len) ? 0 : 1;
+    uint64_t sum = 0;
+    size_t n = 0;
+    for (size_t i = off; i < len; i += 4) {
+        sum += src[i];
+        n++;
+    }
+    return n ? static_cast<int>(sum / n) : -1;
+}
+
+// Returns a freshly allocated w*h*2 RGB565 (little-endian) buffer, or nullptr.
+// The caller owns it; hand it to LvglAllocatedImage and let that free it.
+//
+// HOW THIS ENDED, because the shape of it is worth keeping.
+//
+// The picture went bleached -> legible -> good, and NONE of the fixes were in
+// this function. Every real gain came from upstream of it:
+//
+//   1. The byte phase was measured rather than trusted. It turned out to AGREE
+//      with the driver, which killed the leading theory but confirmed the tone
+//      curve was at least operating on real luma.
+//   2. The frame was arriving at mean 29 with zero clipping. Not too bright -
+//      too DARK, which is the opposite of what the first report suggested.
+//   3. The sensor's own AEC was on, targeting 72, delivering 30, and pinned at
+//      the frame length. Exposure was spent, so it never got there.
+//   4. The gain register was found by sweeping candidates on hardware, because
+//      the driver names none of them.
+//
+// 🔴 THE LESSON, AND IT IS THE ONE THIS PROJECT KEEPS RELEARNING: this function
+//    was tuned three times against a symptom it could not fix. A tone curve can
+//    only redistribute light that was captured; when the complaint is "bleached
+//    out" and the gain is sitting at its ceiling, that is the code SAYING the
+//    problem is upstream. Turning kGamma or kKnee at that point would have made
+//    a flatter picture and buried the real cause.
+//
+//    So: if the picture is wrong again, read the diag line in the tool result
+//    FIRST. mean and gain together say whether there is light to work with, and
+//    only if there is does anything below this line deserve adjusting.
+static uint8_t* ToRgb565(const uint8_t* src, size_t src_len, int w, int h,
+                         v4l2_pix_fmt_t declared, std::string* diag = nullptr) {
+    const size_t need = static_cast<size_t>(w) * h * 2;
+    if (src == nullptr || src_len < need) {
+        return nullptr;
+    }
+
+    const uint32_t even = StreamActivity(src, src_len, 0);
+    const uint32_t odd = StreamActivity(src, src_len, 1);
+    // Luma on even bytes means YUYV.
+    const bool luma_even = LumaEven(src, src_len);
+    const bool declared_yuyv = (declared == V4L2_PIX_FMT_YUYV);
+    ESP_LOGI(TAG, "photo: %dx%d, driver says %s, activity even=%lu odd=%lu -> luma on %s bytes%s",
+             w, h, declared_yuyv ? "YUYV" : "UYVY", (unsigned long)even, (unsigned long)odd,
+             luma_even ? "even" : "odd",
+             luma_even == declared_yuyv ? "" : "  <- DISAGREES WITH THE DRIVER");
+
+    uint8_t* dst = static_cast<uint8_t*>(heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (dst == nullptr) {
+        ESP_LOGE(TAG, "photo: no PSRAM for a %u byte RGB565 frame", (unsigned)need);
+        return nullptr;
+    }
+
+    // Byte offsets within each 4-byte, 2-pixel group.
+    const int y0 = luma_even ? 0 : 1;
+    const int y1 = luma_even ? 2 : 3;
+    const int cb = luma_even ? 1 : 0;
+    const int cr = luma_even ? 3 : 2;
+
+    const size_t groups = need / 4;   // 2 pixels per group
+
+    // 🔴 A TONE CURVE, because the GC0308's own is built for a viewfinder and
+    //    this is a 2" panel in a dim room.
+    //
+    //    The sensor has no reset line, no power-down line and no XCLK from us -
+    //    it free-runs off its own crystal - and the driver exposes exactly two
+    //    controls, HFLIP and VFLIP. There is no exposure, gain or contrast knob
+    //    to turn. So the correction happens here, on the luma channel only, and
+    //    the chroma is left alone: scaling Y changes brightness and contrast
+    //    without touching hue.
+    //
+    //    Two corrections, both measured from the frame rather than assumed:
+    //
+    //    1. EXPOSURE TRIM. The sensor's auto-exposure meters for the whole
+    //       scene, and a dim room with one bright lamp in it is exactly the
+    //       case it gets wrong - it opens up until the lamp is a white hole.
+    //       Normalising the frame's own mean luma toward a target undoes that
+    //       by however much it was actually off, which is why the gain is
+    //       computed and not written down as a constant.
+    //
+    //    2. A SOFT SHOULDER. Applying a gain and clamping just moves where the
+    //       clipping happens. Rolling the top end off compresses highlights
+    //       into the last stretch of range instead of stacking them all on 255,
+    //       which is most of what "too much contrast" looks like on a small
+    //       panel - the picture reading as a few white blobs on near-black.
+    //
+    //    Built as a 256-entry lookup table, so the per-pixel cost is one index
+    //    no matter how elaborate the curve gets. 76800 pixels do not want a
+    //    tanh() each.
+    constexpr int kTargetMean = 112;   // slightly below mid: rooms are dim
+    constexpr float kMinGain = 0.45f;
+    constexpr float kMaxGain = 2.0f;
+    constexpr int kKnee = 176;         // where the highlight rolloff starts
+    constexpr float kGamma = 1.15f;    // >1 lifts shadows, opening up the dark half
+
+    uint64_t luma_sum = 0;
+    uint32_t hot = 0;
+    for (size_t g = 0; g < groups; g++) {
+        const int y = src[g * 4 + y0];
+        luma_sum += y;
+        if (y >= 250) hot++;
+    }
+    const int mean = groups ? static_cast<int>(luma_sum / groups) : kTargetMean;
+
+    float gain = mean > 0 ? static_cast<float>(kTargetMean) / mean : 1.0f;
+    if (gain < kMinGain) gain = kMinGain;
+    if (gain > kMaxGain) gain = kMaxGain;
+    const unsigned long clip_pct = groups ? hot * 100 / groups : 0;
+    ESP_LOGI(TAG, "photo: mean luma %d, %lu%% at clip -> gain %.2f", mean, clip_pct, gain);
+    if (diag != nullptr) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%dx%d %s luma=%s mean=%d clip=%lu%% gain=%.2f", w, h,
+                 declared_yuyv ? "YUYV" : "UYVY", luma_even ? "even" : "odd", mean, clip_pct, gain);
+        *diag = buf;
+    }
+
+    uint8_t lut[256];
+    for (int i = 0; i < 256; i++) {
+        float v = i * gain;
+        if (v > kKnee) {
+            v = kKnee + (255.0f - kKnee) * tanhf((v - kKnee) / (255.0f - kKnee));
+        }
+        v = 255.0f * powf(v / 255.0f, 1.0f / kGamma);
+        lut[i] = Clamp(static_cast<int>(v + 0.5f));
+    }
+
+    // Chroma has to move with the luma or the colour drifts. YUV encodes
+    // saturation as an offset from a given brightness, so darkening Y while
+    // leaving U and V alone makes everything look lurid, and brightening it
+    // makes everything look washed out. Scale the colour differences by however
+    // much the curve moved a typical pixel. 8.8 fixed point.
+    const int cscale = mean > 0 ? (lut[mean] * 256 / mean) : 256;
+
+    uint16_t* out = reinterpret_cast<uint16_t*>(dst);
+    for (size_t g = 0; g < groups; g++) {
+        const uint8_t* p = src + g * 4;
+        const int u = static_cast<int>(p[cb]) - 128;
+        const int v = static_cast<int>(p[cr]) - 128;
+        const int dr = (((kRv * v) >> 16) * cscale) >> 8;
+        const int dg = (-((kGu * u + kGv * v) >> 16) * cscale) >> 8;
+        const int db = (((kBu * u) >> 16) * cscale) >> 8;
+        for (int k = 0; k < 2; k++) {
+            const int y = lut[p[k == 0 ? y0 : y1]];
+            const uint8_t r = Clamp(y + dr);
+            const uint8_t gg = Clamp(y + dg);
+            const uint8_t b = Clamp(y + db);
+            out[g * 2 + k] = static_cast<uint16_t>(((r & 0xF8) << 8) | ((gg & 0xFC) << 3) | (b >> 3));
+        }
+    }
+    return dst;
+}
+
+}  // namespace yuv422
+
+class M5StackStackChanBoard : public WifiBoard {
+    StackChanHead head_;
+    StackChanLeds leds_;
+private:
+    i2c_master_bus_handle_t i2c_bus_;
+    Pmic* pmic_;
+    Aw9523* aw9523_;
+    Ft6336* ft6336_;
+    LcdDisplay* display_;
+    // Same object as display_, kept typed so the board can reach the parts of
+    // StackyFace that are not on the Display interface (the idle status screen).
+    StackyFace* face_ = nullptr;
+    EspVideo* camera_;
+    esp_timer_handle_t touchpad_timer_;
+    PowerSaveTimer* power_save_timer_;
+    // Optional ambient status - see status_source.h. Null in this build.
+    StatusSource* status_ = nullptr;
+    // The level he has already reacted to, which is NOT the same thing as the
+    // level the source last read - see AnnounceStatusIfChanged.
+    StatusSource::Level announced_level_ = StatusSource::Level::kUnknown;
+
+    // Dim after 90s in BOTH power states; only ever power off on battery.
+    //
+    // 🔴 The upstream design was "disable the whole timer while on USB", driven
+    //    from GetBatteryLevel(). That never worked on this board - see the
+    //    stale-edge bug noted at GetBatteryLevel() below - so a plugged-in robot
+    //    shut itself off after five minutes. It is also the wrong shape: with the
+    //    timer disabled on USB there is no screen timeout at all, and the screen
+    //    timeout is what the idle status screen hangs off.
+    //
+    //    So the timer runs ALWAYS, and the power-state decision lives in the
+    //    shutdown callback. Sleep is a display concern; shutdown is a battery
+    //    concern.
+    void InitializePowerSaveTimer() {
+        // 90s to dim. cpu_max_freq -1 keeps the CPU/wake-word path untouched -
+        // he must still hear his name while the screen is down.
+        power_save_timer_ = new PowerSaveTimer(-1, 90, 300);
+        power_save_timer_->OnEnterSleepMode([this]() {
+            // SetPowerSaveMode is what raises StackyFace's idle status screen.
+            GetDisplay()->SetPowerSaveMode(true);
+            // 25, not 10. At 10 the panel is a faint glow - fine for a blank
+            // sleep screen, useless for a status screen carrying numbers. Still
+            // well under the waking level, so it reads as "resting".
+            GetBacklight()->SetBrightness(25);
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+            GetDisplay()->SetPowerSaveMode(false);
+            GetBacklight()->RestoreBrightness();
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            // Asked once a second once the counter passes 300, so keep it cheap
+            // and idempotent. On USB this is simply never the right answer: 550
+            // mAh needs protecting, a wall socket does not.
+            if (!pmic_->IsDischarging()) {
+                return;
+            }
+            ESP_LOGI(TAG, "Idle on battery, powering off");
+            pmic_->PowerOff();
+        });
+        power_save_timer_->SetEnabled(true);
+    }
+
+    void InitializeI2c() {
+        // Initialize I2C peripheral
+        i2c_master_bus_config_t i2c_bus_cfg = {
+            .i2c_port = (i2c_port_t)1,
+            .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
+            .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags = {
+                .enable_internal_pullup = 1,
+            },
+        };
+        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+    }
+
+    void InitializeAxp2101() {
+        ESP_LOGI(TAG, "Init AXP2101");
+        pmic_ = new Pmic(i2c_bus_, 0x34);
+    }
+
+    void InitializeAw9523() {
+        ESP_LOGI(TAG, "Init AW9523");
+        aw9523_ = new Aw9523(i2c_bus_, 0x58);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    void PollTouchpad() {
+        static bool was_touched = false;
+        static int64_t touch_start_time = 0;
+        const int64_t TOUCH_THRESHOLD_MS = 500;  // touches longer than this count as a long press
+        
+        ft6336_->UpdateTouchPoint();
+        auto& touch_point = ft6336_->GetTouchPoint();
+        
+        // touch started
+        if (touch_point.num > 0 && !was_touched) {
+            was_touched = true;
+            touch_start_time = esp_timer_get_time() / 1000; // to milliseconds
+            // Touching the robot wakes him. It did not before: touch only
+            // reached ToggleChatState(), so waking depended on the app changing
+            // power save level as a side effect. Poking a dark screen and
+            // having nothing happen is the obvious thing a person tries first.
+            power_save_timer_->WakeUp();
+        }
+        // touch released
+        else if (touch_point.num == 0 && was_touched) {
+            was_touched = false;
+            int64_t touch_duration = (esp_timer_get_time() / 1000) - touch_start_time;
+            
+            // only a short tap toggles chat
+            if (touch_duration < TOUCH_THRESHOLD_MS) {
+                auto& app = Application::GetInstance();
+                if (app.GetDeviceState() == kDeviceStateStarting) {
+                    EnterWifiConfigMode();
+                    return;
+                }
+                app.ToggleChatState();
+            }
+        }
+    }
+
+    void InitializeFt6336TouchPad() {
+        ESP_LOGI(TAG, "Init FT6336");
+        ft6336_ = new Ft6336(i2c_bus_, 0x38);
+        
+        // poll every 20 ms
+        esp_timer_create_args_t timer_args = {
+            .callback = [](void* arg) {
+                M5StackStackChanBoard* board = (M5StackStackChanBoard*)arg;
+                board->PollTouchpad();
+            },
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "touchpad_timer",
+            .skip_unhandled_events = true,
+        };
+        
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &touchpad_timer_));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(touchpad_timer_, 20 * 1000));
+    }
+
+    void InitializeSpi() {
+        spi_bus_config_t buscfg = {};
+        buscfg.mosi_io_num = GPIO_NUM_37;
+        buscfg.miso_io_num = GPIO_NUM_NC;
+        buscfg.sclk_io_num = GPIO_NUM_36;
+        buscfg.quadwp_io_num = GPIO_NUM_NC;
+        buscfg.quadhd_io_num = GPIO_NUM_NC;
+        buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
+        ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    }
+
+    void InitializeIli9342Display() {
+        ESP_LOGI(TAG, "Init IlI9342");
+
+        // The display reads its theme by name during construction and defaults
+        // to "light" (lcd_display.cc:81) - which is the white screen. Selecting
+        // "dark" has to happen BEFORE that read, and writing the setting is the
+        // only way to influence it without touching live LVGL objects.
+        // Stacky's face is black-and-lavender; a white screen is not the look.
+        {
+            Settings settings("display", true);
+            if (settings.GetString("theme", "light") != "dark") {
+                settings.SetString("theme", "dark");
+                ESP_LOGI(TAG, "display theme -> dark");
+            }
+        }
+
+        esp_lcd_panel_io_handle_t panel_io = nullptr;
+        esp_lcd_panel_handle_t panel = nullptr;
+
+        ESP_LOGD(TAG, "Install panel IO");
+        esp_lcd_panel_io_spi_config_t io_config = {};
+        io_config.cs_gpio_num = GPIO_NUM_3;
+        io_config.dc_gpio_num = GPIO_NUM_35;
+        io_config.spi_mode = 2;
+        io_config.pclk_hz = 40 * 1000 * 1000;
+        io_config.trans_queue_depth = 10;
+        io_config.lcd_cmd_bits = 8;
+        io_config.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &panel_io));
+
+        ESP_LOGD(TAG, "Install LCD driver");
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = GPIO_NUM_NC;
+        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+        panel_config.bits_per_pixel = 16;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(panel_io, &panel_config, &panel));
+        
+        esp_lcd_panel_reset(panel);
+        aw9523_->ResetIli9342();
+
+        esp_lcd_panel_init(panel);
+        esp_lcd_panel_invert_color(panel, true);
+        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
+        esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+
+        // StackyFace, not SpiLcdDisplay: same screen furniture, but the centre
+        // is drawn eyes on a timer instead of an emoji glyph. See stacky_face.h.
+        // It only builds anything during SetupUI(), which Application::Start
+        // calls long after this constructor - nothing here touches LVGL.
+        face_ = new StackyFace(panel_io, panel,
+                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        display_ = face_;
+    }
+
+    // The project look: pure black with lavender. Restyles the registered "dark"
+    // theme in place rather than adding a new theme name - `self.screen.set_theme`
+    // takes a name from the model, and teaching it a third one it may or may not
+    // use is worse than making the one it already asks for correct.
+    //
+    // 🔴 Background is PURE BLACK, not a dark grey. That contrast is most of the
+    //    look, and the stock dark theme's 0x1F1F1F washes it out on an IPS panel
+    //    at desk distance.
+    //
+    // 🔴 DO NOT CALL display_->SetTheme() FROM HERE.
+    //
+    //    LcdDisplay::SetTheme restyles live LVGL objects, and SetupUI() has not
+    //    run yet during board construction - so it dereferences a null content_
+    //    and the device boot-loops with `Guru Meditation Error: LoadProhibited`
+    //    right after "Reset IlI9342".
+    //
+    //    Instead: restyle the registered theme's colours in place. The display
+    //    picks its theme by NAME at construction (default "light") and applies
+    //    the colours later in SetupUI(), so edits made here - after the themes
+    //    are registered, before SetupUI - are simply what gets painted. No live
+    //    objects are touched.
+    void InitializeTheme() {
+        auto* theme = LvglThemeManager::GetInstance().GetTheme("dark");
+        if (theme == nullptr) {
+            ESP_LOGW(TAG, "no dark theme registered; leaving the stock look alone");
+            return;
+        }
+        theme->set_background_color(lv_color_hex(0x000000));
+        theme->set_chat_background_color(lv_color_hex(0x000000));
+        theme->set_text_color(lv_color_hex(0xC9A9FF));         // lavender
+        theme->set_system_text_color(lv_color_hex(0x98A2B3));  // muted grey
+        theme->set_assistant_bubble_color(lv_color_hex(0x1A1430));
+        theme->set_user_bubble_color(lv_color_hex(0x5933AB));  // deep purple
+        theme->set_system_bubble_color(lv_color_hex(0x000000));
+        theme->set_border_color(lv_color_hex(0xA17EFF));       // saturated purple
+        theme->set_low_battery_color(lv_color_hex(0xFF8E8E));  // soft red
+        ESP_LOGI(TAG, "theme applied: black + lavender");
+    }
+
+    // 🔴 BOOT CRASH FIX. Wait until a VSYNC pulse has just gone by before
+    //    letting the DVP driver arm its interrupt.
+    //
+    //    The panic this prevents, decoded from the backtrace:
+    //
+    //      dvp_vsync_isr -> xQueueGenericSendFromISR -> assert -> abort
+    //      ...fired from inside gpio_isr_handler_add(), called by
+    //         esp_cam_new_dvp_ctlr_ext (esp_cam_ctlr_dvp_cam.c:891)
+    //
+    //    The driver arms the VSYNC ISR before the queue that ISR posts to is
+    //    ready. A frame edge landing in that window sends to a null queue and
+    //    the assert takes the whole device down.
+    //
+    //    Why it only sometimes happens - and it is the same lesson the PY32
+    //    taught on the servo rail. Look at the pins:
+    //
+    //      CAMERA_PIN_XCLK  GPIO_NUM_NC   <- 20MHz external crystal, not ours
+    //      CAMERA_PIN_RESET GPIO_NUM_NC   <- no reset line
+    //      CAMERA_PIN_PWDN  GPIO_NUM_NC   <- no power-down line
+    //
+    //    The GC0308 clocks itself and we have no way to stop it. Once it has
+    //    been configured it FREE-RUNS, and a soft reset does not touch it. So
+    //    on a cold boot the sensor is idle and init is safe, while on a soft
+    //    reset - which is what both flashing and esp_restart() produce - VSYNC
+    //    is still pulsing and it is a coin flip. That is the "crashes now and
+    //    then, but comes back" behaviour exactly.
+    //
+    //    We cannot silence the sensor and we should not patch a managed
+    //    component. But we can choose WHEN to arm the interrupt: sit on the
+    //    VSYNC pin, wait for an edge, and start immediately after one. At the
+    //    GC0308's frame rate that buys a full frame period of headroom for a
+    //    setup path that needs microseconds.
+    //
+    //    No edge inside the timeout means the sensor is idle - a cold boot -
+    //    which is the case that was never at risk.
+    void WaitForVsyncGap() {
+        gpio_config_t io = {};
+        io.pin_bit_mask = 1ULL << CAMERA_PIN_VSYNC;
+        io.mode = GPIO_MODE_INPUT;
+        io.pull_up_en = GPIO_PULLUP_DISABLE;
+        io.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io.intr_type = GPIO_INTR_DISABLE;
+        if (gpio_config(&io) != ESP_OK) {
+            return;
+        }
+
+        const int start = gpio_get_level(CAMERA_PIN_VSYNC);
+        // 120ms covers well over one frame at any rate this sensor runs at.
+        const int64_t deadline = esp_timer_get_time() + 120000;
+        while (esp_timer_get_time() < deadline) {
+            if (gpio_get_level(CAMERA_PIN_VSYNC) != start) {
+                ESP_LOGI(TAG, "camera: sensor is free-running, starting just after a VSYNC edge");
+                return;
+            }
+        }
+        ESP_LOGI(TAG, "camera: no VSYNC seen, sensor idle (cold boot)");
+    }
+
+     void InitializeCamera() {
+        WaitForVsyncGap();
+
+        static esp_cam_ctlr_dvp_pin_config_t dvp_pin_config = {
+            .data_width = CAM_CTLR_DATA_WIDTH_8,
+            .data_io = {
+                [0] = CAMERA_PIN_D0,
+                [1] = CAMERA_PIN_D1,
+                [2] = CAMERA_PIN_D2,
+                [3] = CAMERA_PIN_D3,
+                [4] = CAMERA_PIN_D4,
+                [5] = CAMERA_PIN_D5,
+                [6] = CAMERA_PIN_D6,
+                [7] = CAMERA_PIN_D7,
+            },
+            .vsync_io = CAMERA_PIN_VSYNC,
+            .de_io = CAMERA_PIN_HREF,
+            .pclk_io = CAMERA_PIN_PCLK,
+            .xclk_io = CAMERA_PIN_XCLK,
+        };
+
+        esp_video_init_sccb_config_t sccb_config = {
+            .init_sccb = false,
+            .i2c_handle = i2c_bus_,
+            .freq = 100000,
+        };
+
+        esp_video_init_dvp_config_t dvp_config = {
+            .sccb_config = sccb_config,
+            .reset_pin = CAMERA_PIN_RESET,
+            .pwdn_pin = CAMERA_PIN_PWDN,
+            .dvp_pin = dvp_pin_config,
+            .xclk_freq = XCLK_FREQ_HZ,
+        };
+
+        esp_video_init_config_t video_config = {
+            .dvp = &dvp_config,
+        };
+
+        camera_ = new EspVideo(video_config);
+        camera_->SetHMirror(false);
+        // We convert and preview the frame ourselves - see the yuv422 note.
+        camera_->SetAutoPreview(false);
+    }
+
+public:
+
+
+    // The PY32 co-processor on the StackChan base: a 16-bit GPIO expander plus
+    // LED controller, at I2C 0x6F. Its register map was recovered from the
+    // factory firmware and verified on hardware.
+    //
+    //   regs 3 / 4     pin direction. Setting the bit makes the pin an OUTPUT
+    //   regs 9 / 10    drive HIGH
+    //   regs 11 / 12   drive LOW
+    //   regs 5 / 6     configuration touched by the vendor's rail bring-up
+    //   reg 36         LED pixel count + latch (see stackchan_leds.h)
+    //
+    // A SEPARATE chip at 0x41 reports the servo rail in its register 1 - see
+    // EnsureServoRail for how that split was found.
+    //
+    // 🔴 Two things here were wrong for a long time, and both are easy to
+    //    reintroduce, so they are spelled out:
+    //
+    // 1. The level pairs are the opposite way round from what a first reading
+    //    suggests. The vendor's digitalWrite(pin, HIGH) CLEARS the bit in
+    //    (11,12) and SETS it in (9,10). Getting this backwards drives the pin
+    //    low, which looks exactly like "the write was ignored".
+    //
+    // 2. The read-modify-write must ALWAYS issue the write, even when the value
+    //    is unchanged - the vendor's accessor is an unconditional read/OR/write.
+    //    An `if (new != old) write()` optimisation looks free and is not: at
+    //    cold boot regs 9 and 10 both read 0xFF, so ORing in the bit for pin 0
+    //    or pin 13 changes nothing and the write is skipped entirely. The two
+    //    writes that actually power the rail were the two being elided. The
+    //    PY32 acts on the write transaction, not on the resulting value.
+    uint8_t Py32Read(i2c_master_dev_handle_t dev, uint8_t reg) {
+        uint8_t v = 0xFF;
+        i2c_master_transmit_receive(dev, &reg, 1, &v, 1, pdMS_TO_TICKS(100));
+        return v;
+    }
+    void Py32Write(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t val) {
+        const uint8_t buf[2] = { reg, val };
+        i2c_master_transmit(dev, buf, 2, pdMS_TO_TICKS(100));
+    }
+    // Bit accessor, as the vendor firmware does it: bit < 8 uses the low
+    // register of the pair, bit >= 8 uses the high one with (bit - 8). Never
+    // conditional.
+    void Py32Bit(i2c_master_dev_handle_t dev, uint8_t reg_low, uint8_t reg_high,
+                 uint8_t bit, bool set) {
+        uint8_t reg  = (bit >= 8) ? reg_high : reg_low;
+        uint8_t mask = 1u << (bit >= 8 ? bit - 8 : bit);
+        uint8_t v = Py32Read(dev, reg);
+        Py32Write(dev, reg, set ? (uint8_t)(v | mask) : (uint8_t)(v & ~mask));
+    }
+    void Py32PinMode(i2c_master_dev_handle_t dev, uint8_t pin, bool output) {
+        Py32Bit(dev, 3, 4, pin, output);
+    }
+    void Py32DigitalWrite(i2c_master_dev_handle_t dev, uint8_t pin, bool high) {
+        if (high) { Py32Bit(dev, 11, 12, pin, false); Py32Bit(dev, 9, 10, pin, true); }
+        else      { Py32Bit(dev, 9, 10, pin, false);  Py32Bit(dev, 11, 12, pin, true); }
+    }
+
+    // 🔴 THIS RUNS AGAIN, NOT ONLY AT BOOT. Boot-only was a real bug that looked
+    //    like a hardware fault.
+    //
+    //    Seen on the reference unit: plugged back in after running on battery,
+    //    he answered the wake word and talked - and did not move a millimetre.
+    //    Nothing in the firmware was wrong; the rail was simply OFF. The boot log
+    //    showed it exactly: `servo motor rail ON (was OFF, reg1=0xFF->0x00)`. A
+    //    reset fixed it, which is the tell - the bring-up only ever ran in the
+    //    constructor, so ANY event that dropped the rail after boot was
+    //    permanent until a power cycle.
+    //
+    //    The rail is the servos' supply and the servos are by far the largest
+    //    load on a 550 mAh cell, so something below us - the PY32's own logic or
+    //    the PMIC - is entitled to shed it. The ESP32 does not reboot when that
+    //    happens, and it is never told.
+    //
+    // ⚠️ Deliberately NOT diagnosing which event drops it. That would need an
+    //    unplugged experiment on a device whose only diagnostic channel is the
+    //    USB cable being unplugged. Re-asserting a rail is idempotent and costs
+    //    one I2C byte read per check, so the supervisor is cheaper than the
+    //    investigation and covers causes nobody has thought of.
+    //
+    // Returns true if the rail is on when this returns. *recovered is set only
+    // when it was found down and brought back - the caller uses that to re-init
+    // the servo bus, because servos that lost power come back at an unknown
+    // position, and a bus that failed to ping at boot left the head disabled.
+    bool EnsureServoRail(bool* recovered = nullptr, bool announce = false) {
+        if (recovered != nullptr) *recovered = false;
+        // Replays the vendor firmware's base bring-up:
+        //
+        //   pinMode(0, OUTPUT); digitalWrite(0, HIGH);
+        //   set bit 0 in the (5,6) pair
+        //   delay 20 ms
+        //   pinMode(13, OUTPUT); digitalWrite(13, HIGH);
+        //
+        // 🔴 THE EXPANDER IS AT 0x6F. NOT 0x41.
+        //
+        //    This was the whole bug. The vendor logs "PY32IOExpander: Version:
+        //    0x41" - that 0x41 is the VERSION VALUE, and it was read as an I2C
+        //    address. There happens to be a different chip at address 0x41 whose
+        //    register 0 also reads 0x41, which made the mistake self-confirming,
+        //    and whose register 1 genuinely does report the rail - so the status
+        //    read worked perfectly while every write went to the wrong device.
+        //
+        //    A full register diff of rail-ON against rail-OFF settled it. Device 0x6F:
+        //        ON  : EB 41 41 01 20 01 00 00 00 01 20 ...
+        //        OFF : EB 41 41 00 00 00 00 -- -- -- -- ...
+        //                       r3 r4 r5        r9 r10
+        //    reg 3 = 0x01 (pin 0 output), reg 4 = 0x20 (pin 13 output),
+        //    reg 5 = 0x01, reg 9 = 0x01 / reg 10 = 0x20 (both driven HIGH).
+        //    Every decoded semantic was right; only the address was wrong.
+        //    Note 0x6F reg 1 = 0x41 - THAT is the version the vendor prints.
+        const uint8_t kIoeAddr    = 0x6F;   // the expander that drives the rail
+        const uint8_t kStatusAddr = 0x41;   // reports the rail in its reg 1
+
+        i2c_device_config_t scfg = {};
+        scfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        scfg.device_address = kStatusAddr;
+        scfg.scl_speed_hz = 100000;
+        i2c_master_dev_handle_t dev = nullptr;
+        if (i2c_master_bus_add_device(i2c_bus_, &scfg, &dev) != ESP_OK) {
+            ESP_LOGE(TAG, "status chip: not present at 0x41");
+            return false;
+        }
+        i2c_device_config_t icfg = scfg;
+        icfg.device_address = kIoeAddr;
+        i2c_master_dev_handle_t ioe = nullptr;
+        if (i2c_master_bus_add_device(i2c_bus_, &icfg, &ioe) != ESP_OK) {
+            ESP_LOGE(TAG, "PY32 IO expander: not present at 0x6F");
+            i2c_master_bus_rm_device(dev);
+            return false;
+        }
+
+        uint8_t ver = Py32Read(ioe, 0x01);   // version lives here, reads 0x41
+        uint8_t before = Py32Read(dev, 0x01);
+        uint8_t rail = before;
+
+        // 🔴 Reg 1 is a BIT FIELD, not a boolean, and only bit 0 is the rail.
+        //    Testing `== 0x00` reports a powered rail as dead: a boot that read
+        //    0xFE pinged both servos happily. Observed so far:
+        //        0xFF  bit0=1  servos dead
+        //        0x00  bit0=0  servos alive
+        //        0xFE  bit0=0  servos alive
+        //    What the other bits mean is not known; they moved when a bus scan
+        //    was added, so do not assume they are stable.
+        #define RAIL_ON(v) (((v) & 0x01) == 0)
+
+        // The vendor's sequence, now aimed at the expander (ioe) instead of the
+        // status chip. Status is still read from `dev` - the two are different
+        // parts and each only answers for its own half.
+        if (!RAIL_ON(rail)) {
+            Py32PinMode(ioe, 0, true);
+            Py32DigitalWrite(ioe, 0, true);
+            Py32Bit(ioe, 5, 6, 0, true);
+            vTaskDelay(pdMS_TO_TICKS(20));
+            Py32PinMode(ioe, 13, true);
+            Py32DigitalWrite(ioe, 13, true);
+            vTaskDelay(pdMS_TO_TICKS(80));
+
+            rail = Py32Read(dev, 0x01);
+            ESP_LOGI(TAG, "IOE 0x6F bring-up -> r3=%02X r4=%02X r5=%02X r9=%02X r10=%02X, rail=0x%02X (%s)",
+                     Py32Read(ioe, 3), Py32Read(ioe, 4), Py32Read(ioe, 5),
+                     Py32Read(ioe, 9), Py32Read(ioe, 10),
+                     rail, RAIL_ON(rail) ? "ON" : "OFF");
+            if (recovered != nullptr) *recovered = RAIL_ON(rail);
+        }
+        i2c_master_bus_rm_device(ioe);
+        i2c_master_bus_rm_device(dev);
+
+        // Announced on the boot call and whenever the rail had actually gone
+        // away. A supervisor that logged "rail ON" every thirty seconds would
+        // bury the one line that matters in the one place anyone reads.
+        if (announce || !RAIL_ON(before)) {
+            ESP_LOGI(TAG, "PY32 v0x%02X - servo motor rail %s (was %s, reg1=0x%02X->0x%02X)",
+                     ver, RAIL_ON(rail) ? "ON" : "OFF",
+                     RAIL_ON(before) ? "ON" : "OFF", before, rail);
+        }
+        if (!RAIL_ON(rail)) {
+            ESP_LOGW(TAG, "servos unpowered - bring-up did not take (reg1=0x%02X)", rail);
+        }
+        return RAIL_ON(rail);
+    }
+
+    // The boot call: same work, but it always says what it found.
+    void InitializePy32() { EnsureServoRail(nullptr, true); }
+
+    M5StackStackChanBoard() {
+        InitializePowerSaveTimer();
+        InitializeI2c();
+        InitializeAxp2101();
+        InitializeAw9523();
+        InitializePy32();
+        // Same chip as the servo rail, so it must come after InitializePy32 -
+        // that is what brings the base out of its cold-boot state.
+        leds_.Initialize(i2c_bus_);
+        InitializeSpi();
+        InitializeIli9342Display();
+        InitializeTheme();
+        InitializeCamera();
+        InitializeFt6336TouchPad();
+        GetBacklight()->RestoreBrightness();
+
+        head_.Initialize();
+        head_.RegisterMcpTools();
+        // The rail is on the PY32, on the I2C bus this board owns; the head only
+        // has the servos' UART. So it borrows the check from here. Must be set
+        // BEFORE StartMotion, since the motion task is where it runs.
+        head_.SetRailSupervisor([this](bool* recovered) {
+            return EnsureServoRail(recovered);
+        });
+        // The face is the only thing that can see the model start working - it
+        // watches for the user's transcript arriving, because there is no
+        // device state for "thinking". The head wants the same signal. The LED
+        // ring deliberately does NOT get it: the ring can carry ambient status,
+        // and an animation on top of it could mask an alert.
+        if (face_ != nullptr) {
+            face_->SetOnThinking([this](bool on) { head_.SetThinking(on); });
+        }
+        // After the tools, so an early MCP call cannot race the task creation.
+        head_.StartMotion();
+
+        leds_.RegisterMcpTools();
+        RegisterCameraTool();
+        RegisterSpeakerTool();
+        leds_.BootSweep();
+    }
+
+    // Wires an ambient status source into the LED ring, the idle status screen
+    // and spoken alerts. Nothing calls this yet - see status_source.h. Call it
+    // at most once, after construction.
+    void AttachStatusSource(StatusSource* source) {
+        if (source == nullptr || status_ != nullptr) return;
+        status_ = source;
+        leds_.SetStatusSource(source);
+        if (face_ != nullptr) face_->SetStatusSource(source);
+        // The moment he stops talking is the moment a deferred alert can finally
+        // be delivered. Scheduled rather than run inline so it lands after the
+        // state transition has fully settled.
+        leds_.SetOnDeviceStateChanged([this]() {
+            Application::GetInstance().Schedule([this]() { AnnounceStatusIfChanged(); });
+        });
+        // Repaint the ring when a reading lands. Without this the colour would
+        // only change on a device state transition - the next time somebody
+        // spoke to him, the one moment an ambient display is not being looked at.
+        source->SetOnUpdate([this]() {
+            leds_.OnStateChanged();
+            // Hopped onto the main task: the source's task has no business
+            // calling Alert(), which touches the display, audio and emotion.
+            Application::GetInstance().Schedule([this]() { AnnounceStatusIfChanged(); });
+        });
+    }
+
+    // 🔔 The status source speaks first, instead of waiting to be asked.
+    //
+    // When the level CHANGES he does a double-take (if it got worse), the ring
+    // follows, a chime plays and the summary is on the screen - with nobody
+    // having said a word to him.
+    //
+    // 🔴 EDGE, NOT LEVEL. Announcing the current level on every reading would
+    //    mean a chime every few minutes for as long as something stayed broken,
+    //    which is how a useful alert becomes something you unplug.
+    //
+    // 🔴 AND NOT WHILE HE IS BUSY. Alert() overwrites the chat line and plays a
+    //    sound over a reply in progress. If he is not idle, announced_level_ is
+    //    not advanced, so the next reading or state change retries - deferred,
+    //    not dropped. It re-reads the level rather than being handed one, so a
+    //    "went red" that recovered while he was talking is never announced late.
+    void AnnounceStatusIfChanged() {
+        if (status_ == nullptr) return;
+        auto& app = Application::GetInstance();
+        const auto now = status_->level();
+
+        // kUnknown means no contact - the ring already mutes for that, and a
+        // chime because the Wi-Fi blipped is not information.
+        if (now == StatusSource::Level::kUnknown) return;
+        if (now == announced_level_) return;
+        if (app.GetDeviceState() != kDeviceStateIdle) return;
+
+        // The FIRST reading only establishes the baseline, or he would announce
+        // "all healthy" with a chime on every boot.
+        if (announced_level_ == StatusSource::Level::kUnknown) {
+            announced_level_ = now;
+            ESP_LOGI(TAG, "status baseline: %s", LevelName(now));
+            return;
+        }
+
+        const auto prev = announced_level_;
+        const bool worse = now > prev;
+        announced_level_ = now;
+
+        const char* emotion = "neutral";
+        std::string_view sound = Lang::Sounds::OGG_SUCCESS;
+        const char* title = "Status";
+        switch (now) {
+            case StatusSource::Level::kAlert:
+                emotion = "shocked";
+                sound = Lang::Sounds::OGG_EXCLAMATION;
+                title = "Alert";
+                break;
+            case StatusSource::Level::kWarn:
+                emotion = worse ? "confused" : "relaxed";
+                sound = worse ? Lang::Sounds::OGG_POPUP : Lang::Sounds::OGG_SUCCESS;
+                title = "Warning";
+                break;
+            default:
+                emotion = "happy";
+                title = "Recovered";
+                break;
+        }
+
+        // Wake first: the idle screen is exactly where he will be when this
+        // matters, and an alert nobody can read is not an alert.
+        if (power_save_timer_ != nullptr) power_save_timer_->WakeUp();
+        if (worse) head_.Startle();
+
+        std::string message = status_->summary();
+        if (message.empty()) message = "Status changed.";
+        ESP_LOGW(TAG, "status %s -> %s: %s", LevelName(prev), LevelName(now), message.c_str());
+        app.Alert(title, message.c_str(), emotion, sound);
+        // The ring already follows the level via IdleAmbient; it needs no
+        // separate command here, only the repaint the caller has done.
+    }
+
+    static const char* LevelName(StatusSource::Level l) {
+        switch (l) {
+            case StatusSource::Level::kOk:    return "ok";
+            case StatusSource::Level::kWarn:  return "warn";
+            case StatusSource::Level::kAlert: return "alert";
+            default:                          return "unknown";
+        }
+    }
+
+    // 🔊 A/B the amplifier boost by voice, because "is it louder?" is a
+    //    question about a room and not about a register.
+    //
+    //    The alternative was a constant and a reflash per attempt, which makes
+    //    comparing two levels impossible - by the time the second one is
+    //    running, nobody can remember exactly how loud the first was. Toggling
+    //    it live puts both within a few seconds of each other.
+    void RegisterSpeakerTool() {
+        auto& mcp = McpServer::GetInstance();
+        mcp.AddTool(
+            "self.audio_speaker.set_boost",
+            "Turn the speaker amplifier's boost converter on or off. On is much louder; "
+            "off is the quiet default. Use this when someone asks you to be louder or "
+            "quieter and the volume is already at its limit.",
+            PropertyList({Property("enabled", kPropertyTypeBoolean, true)}),
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto* codec = static_cast<CoreS3AudioCodec*>(GetAudioCodec());
+                if (codec == nullptr) return std::string("no audio codec");
+                const bool on = properties["enabled"].value<bool>();
+                codec->SetSpeakerBoost(on);
+                // 🧪 Readback in the RESULT, so the server log answers "did the
+                //    write land?" without a serial capture. The first attempt
+                //    at this changed nothing audible and there was no way to
+                //    tell a failed I2C write from a register that simply does
+                //    not do what I assumed.
+                return std::string("Speaker boost ") + (on ? "on" : "off") + ". [amp " +
+                       codec->DescribeAmp() + "]";
+            });
+
+        // 🔴 There was a set_gain tool here for about an hour. It is gone on
+        //    purpose: a digital multiplier made him loud enough to hear himself
+        //    through mics with no echo reference, so he interrupted his own
+        //    sentence and aborted. A voice-reachable tool that can make the
+        //    robot stop talking mid-answer is not a volume control.
+    }
+
+    // 📷 Take a photo and SHOW it, with nothing leaving the network.
+    //
+    // The stock self.camera.take_photo captures and then calls Explain(), which
+    // POSTs the frame to a vision endpoint. The server's shipped default is a
+    // CLOUD vision API still carrying a placeholder key, so on a local setup the
+    // tool fails - the server logs that the VLLM API key is not set.
+    //
+    // Adding a key would "fix" it by sending pictures of the room to a third
+    // party, which is exactly the exposure this project removes. So the photo
+    // goes to the robot's own screen instead. No server, no model, no round trip.
+    void RegisterCameraTool() {
+        auto& mcp = McpServer::GetInstance();
+        mcp.AddTool(
+            "self.camera.show_photo",
+            "Take a photo with the robot's camera and show it on the robot's own screen. "
+            "Use this when someone asks you to take a picture or show them what you can see. "
+            "The photo stays on the device; you cannot see or describe it yourself.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                if (camera_ == nullptr) return std::string("camera unavailable");
+
+                // 📷 METER, then shoot. See the gc0308 namespace note: the
+                //    sensor's own AEC is pinned at the frame length and cannot
+                //    give us any more light at 20fps, so for one shot we take
+                //    it off auto and expose properly.
+                //
+                //    Each pass costs one frame plus settle time - the sensor
+                //    needs a couple of frames to apply a new exposure, and
+                //    metering the frame that was in flight when we wrote the
+                //    register would just make the loop chase itself.
+                auto borrowed = gc0308::BeginStill(i2c_bus_);
+                bool got = false;
+                int metered = -1;
+                // Start AT the ceiling, not above it. Starting at 900 meant the
+                // very first test - "is there exposure left?" - was already
+                // false, so the loop skipped straight to gain and the exposure
+                // branch could never run at all.
+                int exposure = gc0308::kExpCeil;
+                int gain = borrowed.gain;
+                if (borrowed.held) {
+                    // EXPOSURE FIRST, THEN GAIN - the order a camera uses, and
+                    // for the same reason: exposure collects more light, gain
+                    // only amplifies what arrived, noise included. Gain is the
+                    // last resort, not the first knob.
+                    for (int pass = 0; pass < 4; pass++) {
+                        gc0308::SetExposure(i2c_bus_, exposure);
+                        gc0308::SetGain(i2c_bus_, gain);
+                        // The sensor needs a frame or two to apply this. Metering
+                        // the frame that was already in flight would make the
+                        // loop chase its own tail.
+                        vTaskDelay(pdMS_TO_TICKS(160));
+                        got = camera_->Capture();
+                        if (!got) break;
+                        metered = yuv422::MeanLuma(camera_->frame_data(), camera_->frame_len(),
+                                                   camera_->frame_format());
+                        if (metered < 0) break;          // not YUV; nothing to meter on
+                        if (metered >= 80 && metered <= 145) break;
+                        if (metered <= 0) metered = 1;
+
+                        if (metered < gc0308::kAimMean && exposure >= gc0308::kExpCeil) {
+                            // Out of exposure. Step the gain instead - measured,
+                            // not calculated, because its response is sublinear.
+                            if (gain >= gc0308::kGainMax) break;   // nothing left to give
+                            gain += gc0308::kGainStep;
+                            // Clamp HERE, not only inside SetGain. Letting the
+                            // loop variable run past the cap meant the reported
+                            // gain was 0x74 while the register only ever saw
+                            // 0x60 - a diagnostic that lies about what it did.
+                            if (gain > gc0308::kGainMax) gain = gc0308::kGainMax;
+                        } else {
+                            const int next = exposure * gc0308::kAimMean / metered;
+                            exposure = next > gc0308::kExpCeil ? gc0308::kExpCeil : next;
+                            if (metered > gc0308::kAimMean && gain > borrowed.gain) {
+                                gain -= gc0308::kGainStep;   // back the gain off first
+                            }
+                        }
+                    }
+                } else {
+                    got = camera_->Capture();
+                }
+                // Unconditionally, before any early return below: the sensor
+                // goes back exactly as we found it.
+                gc0308::EndStill(i2c_bus_, borrowed);
+                if (!got) {
+                    return std::string("camera did not return a frame");
+                }
+                const uint8_t* data = camera_->frame_data();
+                const uint16_t w = camera_->frame_width();
+                const uint16_t h = camera_->frame_height();
+                const auto fmt = camera_->frame_format();
+                if (data == nullptr || w == 0 || h == 0) {
+                    return std::string("camera frame was empty");
+                }
+                // 🧪 Both measurements ride back in the tool RESULT, not only
+                //    into the serial log. xiaozhi logs the result verbatim, so
+                //    they can be read out of the container afterwards - which
+                //    means diagnosing this no longer needs a serial capture
+                //    running at the exact moment somebody asks for a photo.
+                //    Three capture windows were missed learning that.
+                std::string diag = gc0308::Describe(i2c_bus_);
+                {
+                    char m[64];
+                    snprintf(m, sizeof(m), " metered=%d exp=%d gain=0x%02X%s", metered, exposure,
+                             gain, borrowed.held ? "" : " (SENSOR NOT HELD)");
+                    diag += m;
+                }
+
+                uint8_t* rgb = nullptr;
+                if (fmt == V4L2_PIX_FMT_YUYV || fmt == V4L2_PIX_FMT_UYVY) {
+                    std::string frame_diag;
+                    rgb = yuv422::ToRgb565(data, camera_->frame_len(), w, h, fmt, &frame_diag);
+                    if (!frame_diag.empty()) diag = frame_diag + "  " + diag;
+                } else if (fmt == V4L2_PIX_FMT_RGB565) {
+                    // Already what the panel wants. Copy anyway: the preview
+                    // outlives this call and EspVideo reuses its frame buffer.
+                    const size_t n = static_cast<size_t>(w) * h * 2;
+                    rgb = static_cast<uint8_t*>(
+                        heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+                    if (rgb != nullptr) memcpy(rgb, data, n);
+                } else {
+                    ESP_LOGW(TAG, "frame format 0x%08" PRIx32 " is not one we can convert",
+                             (uint32_t)fmt);
+                }
+                if (rgb == nullptr) {
+                    return std::string("photo taken, but it could not be prepared for the screen");
+                }
+
+                display_->SetPreviewImage(std::make_unique<LvglAllocatedImage>(
+                    rgb, static_cast<size_t>(w) * h * 2, w, h, w * 2, LV_COLOR_FORMAT_RGB565));
+                // 🔴 This tool must never report failure for anything the model
+                //    could "fix" by trying again. It cannot see the photo - by
+                //    design - so a failure string just makes it apologise and
+                //    retry, which is what "I'm still having trouble taking the
+                //    photo" was: the tool succeeded and said something that
+                //    read like an error.
+                // The sentence first, the numbers after, so the model has
+                // something plain to say and does not read diagnostics aloud.
+                return std::string("Photo taken and shown on the robot's screen. [diag ") + diag +
+                       "]";
+            });
+        ESP_LOGI(TAG, "registered local camera preview tool");
+    }
+
+    virtual AudioCodec* GetAudioCodec() override {
+        static CoreS3AudioCodec audio_codec(i2c_bus_,
+            AUDIO_INPUT_SAMPLE_RATE,
+            AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_MCLK,
+            AUDIO_I2S_GPIO_BCLK,
+            AUDIO_I2S_GPIO_WS,
+            AUDIO_I2S_GPIO_DOUT,
+            AUDIO_I2S_GPIO_DIN,
+            AUDIO_CODEC_AW88298_ADDR,
+            AUDIO_CODEC_ES7210_ADDR,
+            AUDIO_INPUT_REFERENCE);
+        return &audio_codec;
+    }
+
+    virtual Display* GetDisplay() override {
+        return display_;
+    }
+
+    // 🔴 nullptr ON PURPOSE, and it is a privacy control rather than a tidy-up.
+    //
+    //    Board::GetCamera() is reached from exactly two places in the common
+    //    code, and both of them are the cloud vision path:
+    //
+    //      mcp_server.cc:100  registers self.camera.take_photo, whose body is
+    //                         Capture() followed by Explain()
+    //      mcp_server.cc:337  ParseCapabilities() takes the vision URL and
+    //                         token the server offers and stores them on the
+    //                         camera, which is what Explain() then POSTs to
+    //
+    //    Handing back nullptr means the stock tool is never registered and the
+    //    explain URL is never even accepted. The camera itself is untouched -
+    //    self.camera.show_photo talks to camera_ directly - so the robot can
+    //    still take a picture, it just has nowhere off-device to send it.
+    //
+    //    This is also what the model was tripping over. Both tools were on the
+    //    list; it picked take_photo, that failed inside the server with
+    //    "VLLM API key not set", and it announced it was having trouble - after
+    //    the photo was already on the screen.
+    virtual Camera* GetCamera() override {
+        return nullptr;
+    }
+
+    // 🔴 This used to enable/disable the power save timer on the discharging
+    //    EDGE, and the edge could not fire in the one case that mattered:
+    //
+    //        static bool last_discharging = false;          // starts false
+    //        if (discharging != last_discharging) { ... }   // on USB: also false
+    //
+    //    The constructor starts the timer ENABLED, so on USB the intended
+    //    SetEnabled(false) was never reached and the robot powered itself off
+    //    after five minutes while plugged in. Plugged-in was the only broken
+    //    case, which is why it read as "the timeouts need tuning".
+    //
+    //    The timer no longer wants disabling at all - the shutdown callback
+    //    checks the power state itself - so this is now just a battery read.
+    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
+        charging = pmic_->IsCharging();
+        discharging = pmic_->IsDischarging();
+        level = pmic_->GetBatteryLevel();
+        return true;
+    }
+
+    virtual void SetPowerSaveLevel(PowerSaveLevel level) override {
+        if (level != PowerSaveLevel::LOW_POWER) {
+            power_save_timer_->WakeUp();
+        }
+        WifiBoard::SetPowerSaveLevel(level);
+    }
+
+    // Hands the ring to the framework's state machine, so listening / speaking /
+    // connecting show up without anything in application.cc knowing about the
+    // PY32. Falls back to NoLed if the controller did not answer at 0x6F.
+    virtual Led* GetLed() override {
+        static NoLed no_led;
+        if (!leds_.ready()) return &no_led;
+        return &leds_;
+    }
+
+    virtual Backlight *GetBacklight() override {
+        static CustomBacklight backlight(pmic_);
+        return &backlight;
+    }
+};
+
+DECLARE_BOARD(M5StackStackChanBoard);
