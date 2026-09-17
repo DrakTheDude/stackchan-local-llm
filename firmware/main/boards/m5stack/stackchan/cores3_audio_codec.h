@@ -23,6 +23,13 @@ private:
 
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
 
+    // ONE attempt at getting the speaker genuinely open: open the device, prove
+    // the amp answers, set the volume. Returns false having left it closed, and
+    // having pulsed the amp's reset line if the open lied (see EnableOutput).
+    bool TryOpenSpeaker();
+    // TryOpenSpeaker plus the bookkeeping: boost re-applied, output_enabled_ set.
+    bool BringUpSpeaker();
+
     virtual int Read(int16_t* dest, int samples) override;
     virtual int Write(const int16_t* data, int samples) override;
 
@@ -75,6 +82,19 @@ public:
 
 private:
     std::function<void()> amp_reset_;
+
+    // What the rest of the firmware ASKED for, as opposed to what the hardware
+    // managed. These differ exactly when the amp is unreachable, and keeping
+    // both is what lets Write() retry instead of discarding a reply nobody will
+    // ever hear. See the note in Write().
+    bool output_wanted_ = false;
+    int64_t last_open_retry_us_ = 0;
+
+    // The amp keeps its registers across a soft reset - it has its own supply and
+    // the ESP32 rebooting means nothing to it. So the first open of a boot starts
+    // from whatever the LAST boot left behind, which is how a fault can alternate
+    // between reboots. Reset it once per power-up and every boot starts level.
+    bool amp_reset_at_boot_ = false;
     // 🔴 OFF BY DEFAULT, and it was briefly true. Turning the boost on was
     //    MEASURED to change nothing audible - REG61 read back as 0x6673, so the
     //    write landed and simply does not move this speaker - and the popping

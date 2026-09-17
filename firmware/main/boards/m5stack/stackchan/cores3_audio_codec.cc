@@ -1,6 +1,7 @@
 #include "cores3_audio_codec.h"
 
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <driver/i2c_master.h>
 #include <driver/i2s_tdm.h>
 #include <freertos/FreeRTOS.h>
@@ -232,86 +233,124 @@ void CoreS3AudioCodec::EnableInput(bool enable) {
     AudioCodec::EnableInput(enable);
 }
 
+// 🔴 AN OPEN THAT RETURNS OK IS NOT PROOF THE AMPLIFIER IS LISTENING, and
+//    believing it cost a silent robot twice.
+//
+//    This board shares one I2C bus between the PMIC, the PY32, the touch
+//    controller, the camera's SCCB and both audio chips, and about ten seconds
+//    into EVERY boot - as Wi-Fi associates and the wake-word engine starts - it
+//    NAKs for a few hundred milliseconds. Measured on two consecutive boots:
+//        E (10364) I2C_If: Fail to read from dev 6c      <- the amp
+//        E (10384) I2C_If: Fail to read from dev 80      <- the mic codec
+//        E (10424) speaker open failed (ESP_ERR_NOT_SUPPORTED)
+//    It is not occasional. It is every boot, and the only question is what else
+//    is happening at the time.
+//
+//    esp_codec_dev_open can report success in that state. Its register writes
+//    went nowhere, so the amp keeps whatever configuration it had - which after a
+//    soft reset can be "muted" - and every later write is accepted, decoded and
+//    played into a chip that is not listening. From the room: he hears you, he
+//    answers on screen, and he is silent.
+//
+//    So this asks the amp whether it is actually there, and reports failure
+//    honestly rather than leaving the caller believing it has a speaker.
+bool CoreS3AudioCodec::TryOpenSpeaker() {
+    // Play 16bit 1 channel
+    esp_codec_dev_sample_info_t fs = {
+        .bits_per_sample = 16,
+        .channel = 1,
+        .channel_mask = 0,
+        .sample_rate = (uint32_t)output_sample_rate_,
+        .mclk_multiple = 0,
+    };
+    esp_err_t err = esp_codec_dev_open(output_dev_, &fs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "speaker open failed (%s)", esp_err_to_name(err));
+        return false;
+    }
+    if (!AmpResponds()) {
+        // The open lied. Close it, pulse the amp's reset line, and let the
+        // caller try again - a fresh open re-runs aw88298_open, which is what
+        // actually configures the chip, and that has to happen while the bus is
+        // free or it achieves nothing.
+        ESP_LOGW(TAG, "speaker opened but the amp does not answer - resetting it");
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
+        if (amp_reset_) {
+            amp_reset_();
+        }
+        return false;
+    }
+    // See the note in EnableInput. This is the one that actually crashed:
+    // esp_codec_dev_set_out_vol writes the AW88298's volume over the shared I2C
+    // bus, and a single NACK there was taking the device down. Deliberately
+    // AFTER the liveness check - there is no point writing a volume to a chip
+    // that has already been shown not to answer.
+    err = esp_codec_dev_set_out_vol(output_dev_, output_volume_);
+    if (err != ESP_OK) {
+        // Wrong volume is a nuisance; a lost reply is the bug being fixed.
+        ESP_LOGW(TAG, "volume not set (%s) - audio still plays", esp_err_to_name(err));
+    }
+    return true;
+}
+
+bool CoreS3AudioCodec::BringUpSpeaker() {
+    // 🔴 ONCE PER POWER-UP, BEFORE THE FIRST OPEN. The amp has its own supply
+    //    and keeps its registers across a soft reset, so without this the first
+    //    open of a boot inherits whatever the previous boot left behind - and a
+    //    fault that depends on inherited state alternates between reboots, which
+    //    is exactly the symptom that led here ("every other reboot works").
+    //    Resetting unconditionally costs one I2C write and makes every boot
+    //    start from the same place.
+    if (!amp_reset_at_boot_ && amp_reset_) {
+        amp_reset_at_boot_ = true;
+        amp_reset_();
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (!TryOpenSpeaker()) {
+        return false;
+    }
+    // AFTER the open, never before: esp_codec_dev_open re-runs aw88298_open,
+    // which writes REG61 back to boost-disabled. Setting it earlier would be
+    // silently undone.
+    SetSpeakerBoost(speaker_boost_);
+    AudioCodec::EnableOutput(true);
+    return true;
+}
+
 void CoreS3AudioCodec::EnableOutput(bool enable) {
+    // Recorded even when the call is a no-op: Write() needs to know what was
+    // asked for, not what succeeded.
+    output_wanted_ = enable;
     if (enable == output_enabled_) {
         return;
     }
-    if (enable) {
-        // Play 16bit 1 channel
-        esp_codec_dev_sample_info_t fs = {
-            .bits_per_sample = 16,
-            .channel = 1,
-            .channel_mask = 0,
-            .sample_rate = (uint32_t)output_sample_rate_,
-            .mclk_multiple = 0,
-        };
-        // See the note in EnableInput. This is the one that actually crashed:
-        // esp_codec_dev_set_out_vol writes the AW88298's volume over the shared
-        // I2C bus, and a single NACK there was taking the device down.
-        esp_err_t err = esp_codec_dev_open(output_dev_, &fs);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "speaker open failed (%s) - staying closed", esp_err_to_name(err));
+    if (!enable) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
+        AudioCodec::EnableOutput(false);
+        return;
+    }
+    // ⚠️ RETRY FOR LONGER THAN THE GLITCH LASTS. One attempt was not enough: the
+    //    bus stall runs a few hundred milliseconds, and a single failed open at
+    //    the moment he starts speaking threw away the whole reply. Four attempts
+    //    across ~450ms costs a barely perceptible late start in the bad case and
+    //    nothing at all in the good one.
+    constexpr int kAttempts = 4;
+    for (int attempt = 0; attempt < kAttempts; attempt++) {
+        if (attempt > 0) {
+            vTaskDelay(pdMS_TO_TICKS(150));
+        }
+        if (BringUpSpeaker()) {
+            if (attempt > 0) {
+                ESP_LOGI(TAG, "speaker came up on attempt %d", attempt + 1);
+            }
             return;
         }
-        err = esp_codec_dev_set_out_vol(output_dev_, output_volume_);
-        if (err != ESP_OK) {
-            // Wrong volume is a nuisance; a reboot loses the conversation.
-            ESP_LOGW(TAG, "volume not set (%s) - audio still plays", esp_err_to_name(err));
-        }
-        // 🔴 AN OPEN THAT RETURNS OK IS NOT PROOF THE AMPLIFIER IS LISTENING,
-        //    and believing it cost a silent robot.
-        //
-        //    This board shares one I2C bus between the PMIC, the PY32, the touch
-        //    controller, the camera's SCCB and both audio chips, and about ten
-        //    seconds into boot - as Wi-Fi associates and the wake-word engine
-        //    starts - it reliably NAKs for a few hundred milliseconds. Both the
-        //    amp (0x36) and the mic codec (0x40) go unreachable in that window.
-        //
-        //    esp_codec_dev_open reports success in that state. Its register
-        //    writes went nowhere, so the amp keeps whatever configuration it had
-        //    - which after a soft reset can be "muted" - and every later write is
-        //    accepted, decoded and played into a chip that is not listening.
-        //    From the room: he hears you, he answers on screen, and he is silent.
-        //
-        //    The reference robot only ever escaped this by luck. A boot chime
-        //    happened to play 20ms after the failure, retrying the open while the
-        //    bus was free. Remove that chime - as a build with a quieter boot
-        //    does - and the robot stays mute until someone power-cycles it.
-        //
-        //    So: ask the amp whether it is there, and recover if it is not.
-        if (!AmpResponds()) {
-            ESP_LOGW(TAG, "speaker opened but the amp does not answer - resetting it");
-            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
-            if (amp_reset_) {
-                amp_reset_();
-            }
-            vTaskDelay(pdMS_TO_TICKS(20));
-            err = esp_codec_dev_open(output_dev_, &fs);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "speaker reopen failed (%s) - staying closed", esp_err_to_name(err));
-                return;
-            }
-            if (!AmpResponds()) {
-                // Leave it CLOSED rather than pretending. The next playback
-                // retries, and the log says why this one did not work.
-                ESP_LOGE(TAG, "amp still silent after a reset - leaving the speaker closed");
-                ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
-                return;
-            }
-            ESP_LOGI(TAG, "amp recovered after reset");
-            err = esp_codec_dev_set_out_vol(output_dev_, output_volume_);
-            if (err != ESP_OK) {
-                ESP_LOGW(TAG, "volume not set after reset (%s)", esp_err_to_name(err));
-            }
-        }
-        // AFTER the open, never before: esp_codec_dev_open re-runs aw88298_open,
-        // which writes REG61 back to boost-disabled. Setting it earlier would be
-        // silently undone.
-        SetSpeakerBoost(speaker_boost_);
-    } else {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
     }
-    AudioCodec::EnableOutput(enable);
+    // Not fatal, and deliberately not pretended away: Write() keeps trying while
+    // there is audio to play, so this costs the start of one reply rather than
+    // every reply until a power cycle.
+    ESP_LOGE(TAG, "amp unreachable after %d attempts - speaker left closed, "
+                  "retrying while audio plays (%s)", kAttempts, DescribeAmp().c_str());
 }
 
 void CoreS3AudioCodec::SetSpeakerBoost(bool enable) {
@@ -382,6 +421,26 @@ int CoreS3AudioCodec::Read(int16_t* dest, int samples) {
 }
 
 int CoreS3AudioCodec::Write(const int16_t* data, int samples) {
+    // 🔴 SILENTLY DROPPING SAMPLES IS HOW A CLOSED SPEAKER BECAME A ROBOT THAT
+    //    NEVER SPOKE AGAIN. `if (output_enabled_)` alone means a failed open at
+    //    the moment he starts talking discards every sample of that reply, and
+    //    nothing tries again until the next state change - so the user's whole
+    //    question goes unanswered with no sound and no explanation.
+    //
+    //    If output was ASKED for and is not up, keep trying. One attempt per
+    //    250ms: the audio task must not be blocked, and the retries only happen
+    //    while there is something to play, so an idle robot is not poking a dead
+    //    chip forever.
+    if (!output_enabled_ && output_wanted_) {
+        const int64_t now = esp_timer_get_time();
+        if (now - last_open_retry_us_ >= 250000) {
+            last_open_retry_us_ = now;
+            if (BringUpSpeaker()) {
+                ESP_LOGW(TAG, "speaker recovered mid-playback - the start of this "
+                              "reply was lost, the rest will be audible");
+            }
+        }
+    }
     if (output_enabled_) {
         // 🔴 NO DIGITAL GAIN HERE, AND IT IS NOT AN OVERSIGHT. A multiplier was
         //    tried and removed the same hour, because on THIS board it does not
