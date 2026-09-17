@@ -924,7 +924,7 @@ public:
     // A SEPARATE chip at 0x41 reports the servo rail in its register 1 - see
     // EnsureServoRail for how that split was found.
     //
-    // 🔴 Two things here were wrong for a long time, and both are easy to
+    // 🔴 Three things here were wrong for a long time, and all three are easy to
     //    reintroduce, so they are spelled out:
     //
     // 1. The level pairs are the opposite way round from what a first reading
@@ -939,31 +939,78 @@ public:
     //    or pin 13 changes nothing and the write is skipped entirely. The two
     //    writes that actually power the rail were the two being elided. The
     //    PY32 acts on the write transaction, not on the resulting value.
-    uint8_t Py32Read(i2c_master_dev_handle_t dev, uint8_t reg) {
+    // 🔴 3. A FAILED READ IS NOT A VALUE. This returned 0xFF when the PY32 did
+    //       not answer, and Py32Bit below ORed the new bit into that 0xFF and
+    //       wrote it back - so ONE naked read rewrote every other pin in the
+    //       register as an output driven high, and then reported success.
+    //
+    //       It is not theoretical. About ten seconds into every boot, as Wi-Fi
+    //       associates, this shared bus NAKs for a few hundred milliseconds
+    //       (the same window that leaves the amplifier silent - see
+    //       cores3_audio_codec.cc). A supervisor tick landing in it logged
+    //           IOE 0x6F bring-up -> r3=01 r4=20 r5=FF r9=01 r10=20, rail=0xFF
+    //       where the vendor's r5 is 0x01, and the rail stayed off for the rest
+    //       of the session. The "recovery" was doing the damage.
+    //
+    //       So reads report failure and the caller decides. The retries are
+    //       here because the glitch is transient: by the time three attempts
+    //       5 ms apart have failed, the bus is genuinely gone and guessing
+    //       would not have helped anyway.
+    static constexpr int kPy32Tries = 3;
+    bool Py32Read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t* out) {
+        for (int i = 0; i < kPy32Tries; i++) {
+            uint8_t v = 0;
+            if (i2c_master_transmit_receive(dev, &reg, 1, &v, 1,
+                                            pdMS_TO_TICKS(100)) == ESP_OK) {
+                *out = v;
+                return true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+        return false;
+    }
+    // FOR THE DIAGNOSTIC LINE ONLY, where an unreadable register should print as
+    // something rather than suppress the whole message. Never feed this to a
+    // read-modify-write - that is the bug described above.
+    uint8_t Py32Peek(i2c_master_dev_handle_t dev, uint8_t reg) {
         uint8_t v = 0xFF;
-        i2c_master_transmit_receive(dev, &reg, 1, &v, 1, pdMS_TO_TICKS(100));
+        Py32Read(dev, reg, &v);
         return v;
     }
-    void Py32Write(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t val) {
+    bool Py32Write(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t val) {
         const uint8_t buf[2] = { reg, val };
-        i2c_master_transmit(dev, buf, 2, pdMS_TO_TICKS(100));
+        for (int i = 0; i < kPy32Tries; i++) {
+            if (i2c_master_transmit(dev, buf, 2, pdMS_TO_TICKS(100)) == ESP_OK) {
+                return true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+        return false;
     }
     // Bit accessor, as the vendor firmware does it: bit < 8 uses the low
     // register of the pair, bit >= 8 uses the high one with (bit - 8). Never
-    // conditional.
-    void Py32Bit(i2c_master_dev_handle_t dev, uint8_t reg_low, uint8_t reg_high,
+    // conditional on the resulting VALUE (see note 2), but skipped entirely if
+    // the current value is unknown (note 3).
+    bool Py32Bit(i2c_master_dev_handle_t dev, uint8_t reg_low, uint8_t reg_high,
                  uint8_t bit, bool set) {
         uint8_t reg  = (bit >= 8) ? reg_high : reg_low;
         uint8_t mask = 1u << (bit >= 8 ? bit - 8 : bit);
-        uint8_t v = Py32Read(dev, reg);
-        Py32Write(dev, reg, set ? (uint8_t)(v | mask) : (uint8_t)(v & ~mask));
+        uint8_t v = 0;
+        if (!Py32Read(dev, reg, &v)) {
+            ESP_LOGW(TAG, "PY32 reg %u unreadable - skipping the write rather "
+                          "than writing a guess over the other pins", reg);
+            return false;
+        }
+        return Py32Write(dev, reg, set ? (uint8_t)(v | mask) : (uint8_t)(v & ~mask));
     }
-    void Py32PinMode(i2c_master_dev_handle_t dev, uint8_t pin, bool output) {
-        Py32Bit(dev, 3, 4, pin, output);
+    bool Py32PinMode(i2c_master_dev_handle_t dev, uint8_t pin, bool output) {
+        return Py32Bit(dev, 3, 4, pin, output);
     }
-    void Py32DigitalWrite(i2c_master_dev_handle_t dev, uint8_t pin, bool high) {
-        if (high) { Py32Bit(dev, 11, 12, pin, false); Py32Bit(dev, 9, 10, pin, true); }
-        else      { Py32Bit(dev, 9, 10, pin, false);  Py32Bit(dev, 11, 12, pin, true); }
+    bool Py32DigitalWrite(i2c_master_dev_handle_t dev, uint8_t pin, bool high) {
+        if (high) {
+            return Py32Bit(dev, 11, 12, pin, false) && Py32Bit(dev, 9, 10, pin, true);
+        }
+        return Py32Bit(dev, 9, 10, pin, false) && Py32Bit(dev, 11, 12, pin, true);
     }
 
     // 🔴 THIS RUNS AGAIN, NOT ONLY AT BOOT. Boot-only was a real bug that looked
@@ -992,6 +1039,14 @@ public:
     // when it was found down and brought back - the caller uses that to re-init
     // the servo bus, because servos that lost power come back at an unknown
     // position, and a bus that failed to ping at boot left the head disabled.
+    //
+    // The last state actually READ from the chip, used only when a later check
+    // cannot read it at all. Starts optimistic: on the one boot where the very
+    // first read fails there is nothing to recover from yet, the servo ping will
+    // say so, and the next tick re-reads. Claiming a dead rail on no evidence
+    // would print a hardware fault that is really a busy bus.
+    bool rail_known_on_ = true;
+
     bool EnsureServoRail(bool* recovered = nullptr, bool announce = false) {
         if (recovered != nullptr) *recovered = false;
         // Replays the vendor firmware's base bring-up:
@@ -1039,8 +1094,23 @@ public:
             return false;
         }
 
-        uint8_t ver = Py32Read(ioe, 0x01);   // version lives here, reads 0x41
-        uint8_t before = Py32Read(dev, 0x01);
+        uint8_t ver = Py32Peek(ioe, 0x01);   // version lives here, reads 0x41
+
+        // ⚠️ An unreadable status register is NOT a dead rail. 0xFF is what a
+        //    NAK used to look like, and 0xFF reads as OFF - so a bus glitch
+        //    invented a fault and then "fixed" it by writing over the
+        //    expander's configuration. If the chip will not answer, do nothing:
+        //    say so, report the last thing actually observed, and let the next
+        //    tick thirty seconds later look again.
+        uint8_t before = 0;
+        if (!Py32Read(dev, 0x01, &before)) {
+            ESP_LOGW(TAG, "status chip 0x41 did not answer - rail state unknown, "
+                          "leaving it alone (last known %s)",
+                     rail_known_on_ ? "ON" : "OFF");
+            i2c_master_bus_rm_device(ioe);
+            i2c_master_bus_rm_device(dev);
+            return rail_known_on_;
+        }
         uint8_t rail = before;
 
         // 🔴 Reg 1 is a BIT FIELD, not a boolean, and only bit 0 is the rail.
@@ -1065,10 +1135,10 @@ public:
             Py32DigitalWrite(ioe, 13, true);
             vTaskDelay(pdMS_TO_TICKS(80));
 
-            rail = Py32Read(dev, 0x01);
+            Py32Read(dev, 0x01, &rail);   // unchanged from `before` if it NAKs now
             ESP_LOGI(TAG, "IOE 0x6F bring-up -> r3=%02X r4=%02X r5=%02X r9=%02X r10=%02X, rail=0x%02X (%s)",
-                     Py32Read(ioe, 3), Py32Read(ioe, 4), Py32Read(ioe, 5),
-                     Py32Read(ioe, 9), Py32Read(ioe, 10),
+                     Py32Peek(ioe, 3), Py32Peek(ioe, 4), Py32Peek(ioe, 5),
+                     Py32Peek(ioe, 9), Py32Peek(ioe, 10),
                      rail, RAIL_ON(rail) ? "ON" : "OFF");
             if (recovered != nullptr) *recovered = RAIL_ON(rail);
         }
@@ -1086,7 +1156,8 @@ public:
         if (!RAIL_ON(rail)) {
             ESP_LOGW(TAG, "servos unpowered - bring-up did not take (reg1=0x%02X)", rail);
         }
-        return RAIL_ON(rail);
+        rail_known_on_ = RAIL_ON(rail);
+        return rail_known_on_;
     }
 
     // The boot call: same work, but it always says what it found.
