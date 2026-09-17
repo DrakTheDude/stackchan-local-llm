@@ -63,9 +63,9 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 
 ## Open questions
 
-- **Public repo name.** "Stack-chan" is, as far as we know, the name of the original open-source robot
-  project by Shinya Ishikawa that M5Stack's product builds on. A repo named just `stackchan` could read as
-  the official one. Something distinguishing — e.g. `stackchan-local` — may be kinder. Verify, then decide.
+- ✅ **Public repo name: `stackchan-local-llm`.** "Stack-chan" is, as far as we know, the name of the
+  original open-source robot project by Shinya Ishikawa that M5Stack's product builds on, so a bare
+  `stackchan` could read as the official one. This says what the project is and can't be mistaken for it.
 - **License copyright holder.** MIT needs a named holder; attribution ("by Drax and Claude, built with
   Claude Code") can say more than the copyright line.
 - **Other upstream boards.** `firmware/main/boards` is ~3.5 MB of boards that aren't StackChan. Pruning

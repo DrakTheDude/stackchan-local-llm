@@ -1,4 +1,4 @@
-# stackchan — project brief
+# stackchan-local-llm — project brief
 
 **Local-LLM firmware and server for the M5Stack StackChan.** The robot talks to a voice pipeline and a
 language model running on the owner's own machine, and nothing leaves their network.

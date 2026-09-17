@@ -1,4 +1,4 @@
-# stackchan
+# stackchan-local-llm
 
 **Your StackChan, your language model, your network.**
 
