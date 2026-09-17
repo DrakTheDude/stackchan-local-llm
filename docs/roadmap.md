@@ -25,8 +25,14 @@ The **critical path** to a usable release is marked 🔑.
 
 English-first board support, with every hardware assumption written down next to how to check it.
 
-- ⬜ Port the StackChan board from the reference project, **with personal and homelab specifics removed
-  as it comes in** — never committed first and cleaned later
+- 🟡 Port the StackChan board from the reference project, **with personal and homelab specifics removed
+  as it comes in** — never committed first and cleaned later. Face, head, LEDs, camera, audio, power and
+  wake word ported; investigation instruments removed; the homelab client replaced by a `StatusSource`
+  interface with nothing attached. Awaiting a hardware test.
+- ⬜ 🔑 **Per-unit servo calibration.** `scs_servo.h` hard-codes the reference unit's factory centre
+  (460 / 620) and a +14 pan trim. Another robot's centre will differ, and the tilt safety clamp is computed
+  around it — so this is a **safety** item, not cosmetic. Read each unit's own factory calibration, which
+  survives flashing the app partition.
 - ⬜ 🔑 **Server address configurable after flashing.** Today it's compiled in and upstream has no
   on-device setting, so a prebuilt `.bin` can't know the owner's server. Likely a field on the Wi-Fi setup
   page the robot already serves on first boot, stored in NVS, with the compiled value as a default. This
@@ -74,6 +80,10 @@ project proved the path end to end.
 - ⬜ 🔴 **Safety guidance.** Voice has no confirmation step, and speech recognition mishears. Recommend
   read-only tools by default and an explicit allowlist for anything that changes the world — a misheard
   sentence must not be able to unlock a door.
+- ⬜ 🔴 **Audit the upstream device tools the model can call.** The firmware compiles in, among others,
+  `self.upgrade_firmware` and `self.assets.set_download_url` (both fetch from a URL), `self.reboot`,
+  `self.screen.snapshot` and `self.screen.preview_image`. Decide which a voice-driven local robot should
+  expose, and remove or gate the rest.
 
 ## 4. Reproducibility ⬜
 
@@ -108,6 +118,7 @@ The reason the project exists, so it gets a page of its own rather than a promis
 - ⬜ `xiaozhi-esp32`: the StackChan board; a runtime-configurable server address
 - ⬜ `xiaozhi-esp32`: 14 language packs start `ACCESS_VIA_BROWSER` with a Chinese full-width comma
   (fixed here already)
+- ⬜ `xiaozhi-esp32`: `I2cDevice` aborts the whole device on one flaky I²C transfer (fixed here already)
 - ⬜ Possibly: English logging / i18n for the server
 
 ## Release ⬜
