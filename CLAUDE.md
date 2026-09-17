@@ -47,7 +47,7 @@ drafts, comments, examples, and test fixtures:
 | **upstream** | pinned on purpose. Bumping is a deliberate step, never a side effect |
 | **structure** | four pillars — firmware/platform, local AI stack, integration interface, reproducibility — plus verifiable privacy. See [docs/roadmap.md](docs/roadmap.md) |
 | **backends** | nothing model- or vendor-specific. The LLM is any OpenAI-compatible endpoint with tool calling; every pipeline stage is a setting |
-| **integration** | *proposed, not yet confirmed:* MCP as the contract, no new API |
+| **integration** | **MCP is the contract** — no new API. It's what users already know, the server already mounts any MCP server, and it was proven end to end in the reference project |
 | **safety** | voice has no confirmation step — documented guidance is read-only tools by default, with an explicit allowlist for anything that acts |
 
 ## Layout

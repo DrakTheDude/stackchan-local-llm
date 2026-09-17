@@ -60,8 +60,9 @@ Wake word → STT → model → TTS, with every backend a setting rather than a 
 
 ## 3. Integration interface ⬜
 
-**Proposed: MCP is the contract — no new API.** The server already mounts any MCP server as tools for the
-model, Home Assistant ships an official MCP server, and the reference project proved the path end to end.
+**Decided: MCP is the contract — no new API.** It's what most users will already know, the server already
+mounts any MCP server as tools for the model, Home Assistant ships an official MCP server, and the reference
+project proved the path end to end.
 
 - ⬜ **Tools for the model:** how to add an MCP server (stdio / SSE / streamable HTTP), with worked
   examples — Home Assistant, a notes or files server, a custom one
@@ -127,7 +128,7 @@ release. Upstream PRs whenever a piece is solid.
 - ✅ **Public repo name: `stackchan-local-llm`.** "Stack-chan" is, as far as we know, the name of the
   original open-source robot project by Shinya Ishikawa that M5Stack's product builds on, so a bare
   `stackchan` could read as the official one. This says what the project is and can't be mistaken for it.
-- **Integration contract.** MCP is proposed. Confirm before building on it.
+- ✅ **Integration contract: MCP.** Familiar to users, already supported by the server, proven in practice.
 - **License copyright holder.** MIT needs a named holder; attribution can say more than the copyright line.
 - **Other upstream boards.** `firmware/main/boards` is ~3.5 MB of boards that aren't StackChan. Pruning
   shrinks the fork but makes every upstream merge conflict-prone. Keep for now.
