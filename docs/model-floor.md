@@ -22,6 +22,39 @@ score, the fastest first word measured, and no reasoning to fight with.
 ./server/use-model.sh mistral-nemo:12b
 ```
 
+It is also the one that won a listening test against `gpt-oss:20b`, which matches it on every number in
+the table and fits the same card. Both were tried on the real robot, warm, with the same prompt. The
+verdict on gpt-oss was that it *"felt hesitant to talk to me"* — and that is the 0.34 s it spends
+reasoning before its first word, against nemo's 0.09 s. A third of a second does not look like much
+written down; it sits exactly where a person expects an answer.
+
+⚠️ **The trade is real, though.** On ten greetings, `gpt-oss:20b` never reached for a tool and nemo
+reached once. One in ten sounds small until you say hello to a robot a dozen times a day. If your robot
+has many tools and you greet it often, gpt-oss is the safer pick and you will wait a third of a second
+for it.
+
+## The greeting is the test nobody writes
+
+Before the table: the single most useful case in this bench came from a robot, not from the bench.
+
+`mistral-nemo:12b` scored **100% on every case** here and was then unusable on hardware — it answered
+the wake word by calling a `help` tool and reading fifty-three sentences of feature menu aloud, emoji
+headers and all. Ten seconds before it said anything anybody wanted.
+
+The firmware sends the wake phrase to the model **as though you had spoken it**, so every conversation
+opens with it. It is the most frequent input in the entire system and it was not in the test suite,
+because it is too obvious to think of. There is a `greeting` case now.
+
+Two things made it fire, and only one was the model:
+
+- The tool's own description said to call it when the user asks *"how to get started"* or *"wants the
+  tour"* — which is what a greeting looks like. The fix was to **withhold the tool from the model**
+  rather than instruct against it.
+- The result was a markdown document. The robot's persona says *"plain English only, no markdown, no
+  bullet points, no emoji"* — but the markdown arrived in the **tool result**, where no instruction
+  reaches it. A tool whose output cannot be spoken is wrong for a voice robot even when calling it was
+  right.
+
 ## What actually matters
 
 Not prose quality. **Tool calling.**

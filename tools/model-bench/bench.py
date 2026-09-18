@@ -181,6 +181,24 @@ CASES = [
         None,
         None,
     ),
+    (
+        # 🔴 THE MOST FREQUENT PROMPT IN THE WHOLE SYSTEM, and it was missing.
+        #
+        #    The firmware sends the wake phrase to the model as if the user had
+        #    spoken it (CONFIG_SEND_WAKE_WORD_DATA), so EVERY conversation opens
+        #    with this exact string. A model that answers it by calling a tool
+        #    has made the robot unusable before anyone has asked for anything.
+        #
+        #    Found on hardware, not here: a model that scored 100% on every case
+        #    above answered the greeting by calling a `help` tool and reading 53
+        #    sentences of menu out loud. Ten seconds of that before a word
+        #    anybody wanted. The lighthouse case did not catch it, because
+        #    "write me something" and "hello" are different invitations.
+        "greeting",
+        "Hi,Stack Chan",
+        None,
+        None,
+    ),
 ]
 
 
