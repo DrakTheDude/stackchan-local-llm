@@ -8,28 +8,45 @@ camera — with nothing sent to a cloud service.
 
 By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 
-> 🚧 **Early work in progress — not usable yet.** The design is proven on real hardware in a private
-> predecessor project; this repo is where it becomes something anyone can install. Follow along in
-> [docs/roadmap.md](docs/roadmap.md).
+> **Working, on real hardware, daily.** Voice, face, head, LED ring, camera, wake word, an on-screen
+> settings menu and the privacy switches are all in use on the reference robot. You build the firmware
+> yourself today — prebuilt binaries and a browser flasher are the next job.
+>
+> Verified on **one** StackChan. If you have one, reports from a second are the most useful thing you
+> could contribute. See [docs/roadmap.md](docs/roadmap.md).
 
-## What it will be
+## What it does
 
 | | |
 |---|---|
-| **Firmware and platform** | English-first board support for the StackChan — face, head, LED ring, camera, on-device wake word — with every hardware assumption documented alongside a way to check it |
-| **Local AI stack** | wake word → speech-to-text → model → text-to-speech, each stage swappable. Bring any OpenAI-compatible model server that supports tool calling |
-| **Integration interface** | [MCP](https://modelcontextprotocol.io) as the contract: give the model your own tools (Home Assistant, anything with an MCP server), and let the robot show a status on its ring and screen |
-| **Reproducibility** | full English docs: firmware backup and restore, flashing, bring-up, troubleshooting, known board variants — and a path from a factory robot to a local one in about 30 minutes |
+| **Talks to you, locally** | wake word on the robot; speech-to-text, model and speech synthesis on a machine you own. Any OpenAI-compatible endpoint with tool calling — Ollama by default, llama.cpp for speed |
+| **Has a face** | drawn rather than played back: it blinks, holds your gaze, squints, reacts while he thinks and speaks, and the head moves with him |
+| **Uses tools** | [MCP](https://modelcontextprotocol.io) is the contract. Point him at Home Assistant or anything else with an MCP server, and an ambient status can drive his LED ring and idle screen |
+| **Takes photos** | metered and tone-mapped on the device, shown on his own screen. There is no cloud vision path, by construction |
+| **Can be switched off** | microphone and camera have real switches in the settings menu. The mute closes the input device — the wake word stops too — and survives a reboot |
 
-Plus a checklist you can run yourself to **verify nothing leaves your network.**
+## Start here
+
+| | |
+|---|---|
+| **[Quickstart](docs/quickstart.md)** | factory robot → local robot. Back up first; that step is not optional |
+| **[What you gain and lose](docs/stock-vs-local.md)** | honestly, against the firmware it shipped with. He will not dance any more |
+| **[Check the privacy claim](docs/privacy.md)** | six checks you can run yourself, and what this does *not* protect you from |
+| **[Roadmap](docs/roadmap.md)** | what is done, what is next, and what is still verified on only one robot |
 
 ## Why
 
 The StackChan's factory "AI agent" firmware sends your voice to a remote service, with an always-on
-microphone and a camera pointed at your room. The XiaoZhi stack it's built on is open source and can be
+microphone and a camera pointed at your room. The XiaoZhi stack it is built on is open source and can be
 self-hosted — but not on this robot out of the box, and not in English without work.
+
+If you own one and have not thought about this, the most useful thing on this site is not our
+comparison table — it is [the `strings` one-liner](docs/privacy.md#1-read-every-url-in-the-firmware)
+pointed at your own factory backup. Look at what your robot dials before you decide whether to change it.
 
 ## Built on
 
 - [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) — ESP32 voice assistant firmware (MIT)
 - [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) — the voice pipeline server (MIT)
+
+Licensed MIT — see [LICENSE](LICENSE), which also carries the upstream notices.

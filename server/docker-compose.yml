@@ -151,7 +151,8 @@ services:
   #    offers attenuation only - no gain anywhere - into a 1 W speaker, and
   #    digital gain in the firmware makes him hear himself and abort mid-sentence
   #    (there is no echo reference on the board). So a voice with more energy in
-  #    it is the only free loudness available. See docs/voice.md.
+  #    it is the only free loudness available. The measurements that settled the
+  #    default voice are in the TTS section of config.example.yaml.
   # ---------------------------------------------------------------------------
   kokoro:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest

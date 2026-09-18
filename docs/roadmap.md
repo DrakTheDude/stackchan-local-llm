@@ -8,6 +8,21 @@ Status key: ⬜ not started · 🟡 in progress · ✅ done
 The project is organised around **four pillars**, with privacy verification running through all of them.
 The **critical path** to a usable release is marked 🔑.
 
+## Where it stands
+
+**The firmware is done** — not feature-complete, but stable enough that further work is features rather
+than fixes. It is in daily use on the reference robot: repeated power cycles with no boot failure and no
+lock-up, after a week of chasing intermittent audio faults that turned out to be four separate bugs
+around one undiagnosed I²C stall. Both release blockers are closed: each robot reads its own factory
+servo calibration, and the server address is set on the robot rather than compiled in.
+
+**What is left before this is easy for someone else** is packaging, not code: prebuilt binaries, a
+browser flasher, and honest numbers for which models are actually good enough.
+
+⚠️ **All of it is verified on exactly one robot.** Every hardware claim here — the I²C map, the servo
+rail, the camera's behaviour, the audio quirks — comes from a single unit. A report from a second one is
+worth more to this project than any feature on this list.
+
 ---
 
 ## Foundation ✅
@@ -21,15 +36,22 @@ The **critical path** to a usable release is marked 🔑.
 
 ---
 
-## 1. Firmware and platform ⬜
+## 1. Firmware and platform 🟡
 
 English-first board support, with every hardware assumption written down next to how to check it.
 
-- 🟡 Port the StackChan board from the reference project, **with personal and homelab specifics removed
-  as it comes in** — never committed first and cleaned later. Face, head, LEDs, camera, audio, power and
+- ✅ **Port the StackChan board from the reference project**, with personal and homelab specifics removed
+  as it came in — never committed first and cleaned later. Face, head, LEDs, camera, audio, power and
   wake word ported; investigation instruments removed; the homelab client replaced by a `StatusSource`
-  interface with nothing attached. Tested on hardware: voice, face, head, idle dim and the wake word all
-  work, and the port found two real bugs that the reference firmware had been surviving by luck (below).
+  interface with nothing attached. In daily use, and the port found several real bugs the reference
+  firmware had been surviving by luck — a silent amplifier, a deaf microphone, and a `Read()` that
+  claimed to have filled a buffer it never touched.
+- ✅ **On-screen settings menu**, reached by holding the screen for five seconds: Wi-Fi & server, volume,
+  brightness, a self-check, About, and the privacy switches. Full screen, themed, and the only board in
+  the tree that gives LVGL a pointer — enabled solely while the menu is open.
+- ✅ **Privacy switches.** The microphone switch closes the input device, so the wake word stops too; the
+  camera switch refuses at the point of capture. Both persist across a reboot and the mute shows on
+  screen, because a mute you cannot see is one you will forget.
 - ⬜ **Diagnose the boot-time I²C glitch, rather than only surviving it.** About ten seconds into every
   boot, as Wi-Fi associates and the wake-word engine starts, the shared bus NAKs for a few hundred
   milliseconds. Both chips on it go unreachable, and two separate faults came out of that one window: a
@@ -60,23 +82,17 @@ English-first board support, with every hardware assumption written down next to
   IDs and per-unit calibration, LED chain order, camera sensor. Verified on one unit so far — say so.
 - ⬜ Board variants: a diagnostic mode that prints the I²C scan and rail / servo / codec checks, so a report
   from a different unit can be compared against a known-good one
-- ⬜ **A settings surface, because right now there are three and none of them is one.** Settings live in
-  the build (`Kconfig`), in NVS via the Wi-Fi portal's two fields, and in MCP tools the model can call —
-  so "change something" means rebuild, or re-enter config mode, or ask him out loud, depending on which
-  thing. Candidates that genuinely want a home: the **pan/tilt trim** (a rebuild today, and it is the one
-  number every owner has to set for their own robot), the ambient **status source** URL and token, screen
-  and standby timeouts, the **skin**, and the privacy switches — camera off, microphone muted — which are
-  exactly the settings this project should make visible rather than bury.
-  Shape, not yet decided, and there are two candidates:
-  - **On the robot's own screen**, reached by touch. The factory firmware had exactly this — volume, LEDs
-    and so on — so it is both prior art and what an owner will look for first. It needs no network, it
-    cannot be reached by anything else on the LAN, and it is the obvious home for a skin picker. It costs
-    LVGL work and screen real estate on a 320×240 panel.
-  - **A small page served on the LAN.** Easier to build rich controls in, and typable — useful for a
-    status-source URL nobody wants to enter with a touch keyboard. ⚠️ But it is a listening socket on a
-    device whose whole selling point is that it does not phone anywhere, so binding, authentication and
-    whether it is off by default are decisions to make deliberately, not afterwards.
-  The Wi-Fi portal is NOT the answer for either: its HTML lives in a managed component, so every field
+- 🟡 **Finish moving settings onto the robot.** The on-screen menu exists and took the ones that matter
+  most — Wi-Fi & server, volume, brightness, the self-check, About, and the privacy switches. What is
+  still scattered: the **pan/tilt trim** is a rebuild, and it is the one number every owner has to set for
+  their own robot; the ambient **status source** URL and token have no home at all; screen and standby
+  timeouts are compiled in.
+  The trim is the awkward one — it wants a live preview ("move until he looks straight"), which is a
+  different kind of screen from a list of switches.
+  ⚠️ A page served on the LAN would be easier to type into, and is a listening socket on a device whose
+  selling point is that it does not phone anywhere. If it is ever built, binding, authentication and
+  being off by default are deliberate decisions, not afterthoughts.
+  The Wi-Fi portal is NOT the place for any of it: its HTML lives in a managed component, so every field
   added there is a fork to maintain. It stays for what it is good at — the things you need *before* the
   robot is on the network.
 - ⬜ 🎭 **[Characters — a skin for the whole robot](characters.md).** Not a colour scheme: look, motion,
@@ -86,24 +102,34 @@ English-first board support, with every hardware assumption written down next to
   `InitializeTheme()` — and the hard part is that a character **spans two machines**, since look and motion
   live on the robot while voice and persona live in server config.
 
-## 2. Local AI stack ⬜
+## 2. Local AI stack 🟡
 
 Wake word → STT → model → TTS, with every backend a setting rather than a choice made for you.
 
-- ⬜ `docker compose` stack with each stage replaceable: VAD, STT, LLM, TTS
-- ⬜ **LLM: any OpenAI-compatible endpoint with tool calling.** Test and document at least llama.cpp,
-  Ollama and LM Studio, including each one's tool-calling template requirements.
-- ⬜ **Measure an honest model floor.** Only a 32B on a 24 GB GPU is verified, and tool calling is exactly
-  what small models get wrong. Test ~8B and ~14B on real tasks and publish the results, failures included.
-- ⬜ STT: English-only Whisper by default. The upstream provider never sends a language, so multilingual
-  models drift into other languages on short utterances — document it, or patch it.
-- ⬜ TTS: Kokoro by default. Voice choice documented as a **loudness** decision on a 1 W speaker, with the
-  measurement script.
-- ⬜ Server patch kit carried over, every replacement asserted: English pass (prompts, few-shot examples,
-  tool schemas, spoken fallbacks, memory summariser, sentence splitter) and upstream bug fixes
-- ⬜ Our own fully English, commented `config.yaml`, **privacy-relevant keys set explicitly** — config
-  merges over upstream defaults, and some of those defaults are cloud services
-- ⬜ Generic persona; local memory; a log glossary for the Chinese server logs
+- ✅ **`docker compose` stack with each stage replaceable**: VAD, STT, LLM, TTS. One file, one
+  `.env`, and a single value that must change — this machine's LAN address.
+- 🟡 **LLM: any OpenAI-compatible endpoint with tool calling.** Ollama is the default and llama.cpp
+  is a compose profile; both are configured and documented, with LM Studio as a commented third.
+  Only llama.cpp is *verified* in daily use. The template requirement is written down because it
+  is the usual reason a model "cannot call tools" — llama.cpp needs `--jinja`.
+- 🟡 🔑 **[Measure an honest model floor](model-floor.md).** The page exists and is explicit about the
+  split: one configuration verified (Qwen3-32B Q4, tool calls reliable, 33–34 tok/s) and the rest
+  reasoning rather than measurement. Still to do: actually run ~14B, ~8B and a ~4B and publish what
+  happens, failures included. Tool calling is what breaks first, and it breaks silently.
+- ✅ **STT: English-only Whisper by default**, with the reason in the config: the provider never sends a
+  language, so a multilingual model auto-detects per utterance and short ones are where that fails.
+- ✅ **TTS: Kokoro by default**, and the voice documented as a **loudness** decision rather than a taste
+  one — with the measurements, and the warning that Kokoro normalises level so choosing by ear on good
+  speakers picks wrong for this one.
+- ✅ **Server patch kit carried over, every replacement asserted** — an upstream bump fails the build
+  rather than silently restoring Chinese or a bug. English pass plus the language-neutral fixes, and
+  now the clock format, which had to move into the substitution because a persona rule lost to the
+  literal string in the prompt.
+- ✅ **Our own fully English, commented config**, with the privacy-relevant keys set explicitly and
+  marked as such: the empty plugin allowlist and the memory summariser's `llm`, both of which inherit
+  cloud defaults if omitted, because the config merges rather than replaces.
+- 🟡 Generic persona ✅ and local memory ✅; a log glossary for the Chinese server logs is still missing,
+  and it is the next thing somebody reading their own logs will want.
 - ⬜ CPU-only / non-NVIDIA notes, if anything is acceptably fast
 
 ## 3. Integration interface ⬜

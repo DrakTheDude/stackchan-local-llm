@@ -1,0 +1,42 @@
+MIT License
+
+Copyright (c) 2026 Drax
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+THIRD-PARTY NOTICES
+
+`firmware/` is a fork of xiaozhi-esp32 and carries its own MIT licence, which is
+preserved unchanged at `firmware/LICENSE`:
+
+    Copyright (c) 2025 Shenzhen Xinzhi Future Technology Co., Ltd.
+
+That licence continues to govern the upstream code in that directory. The
+modifications in it — the StackChan board, the face, the servo driver, the camera
+work and the fixes described in the commit history — are covered by the licence
+above.
+
+The server side builds on xiaozhi-esp32-server (xinnan-tech), which is not
+redistributed here: `server/` contains a Dockerfile that starts from their
+published image and a set of patch scripts. Their licence governs their code.
+
+ESP-IDF, LVGL, esp-sr and the other components pulled in at build time carry
+their own licences, unchanged and unbundled.
