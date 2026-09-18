@@ -606,6 +606,12 @@ void StackyFace::SetMuted(bool muted) {
     muted_want_ = muted;
 }
 
+// Same contract as SetMuted: leave a flag, let the LVGL task draw it. Safe to
+// call from any task, including before the face exists.
+void StackyFace::SetNoServer(bool no_server) {
+    no_server_want_ = no_server;
+}
+
 // Runs from Tick(), i.e. inside the LVGL task with the lock already held.
 //
 // Deliberately a WORD and not only a symbol: a small red dot on a robot's face
@@ -637,6 +643,46 @@ void StackyFace::ApplyMuteBadge() {
         lv_obj_clear_flag(mute_badge_, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(mute_badge_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// Runs from Tick(), i.e. inside the LVGL task with the lock already held.
+//
+// Bottom RIGHT, because the mute badge has the left corner and both can be true
+// at once - a muted robot with no server is a perfectly ordinary first boot.
+//
+// Amber rather than the mute badge's red: nothing is broken and nothing is
+// recording, there is simply a setting nobody has filled in. Red would send an
+// owner looking for a fault that does not exist.
+void StackyFace::ApplyNoServerBadge() {
+    const bool want = no_server_want_;
+    if (want == no_server_shown_) {
+        return;
+    }
+    no_server_shown_ = want;
+    if (no_server_badge_ == nullptr) {
+        if (!want) {
+            return;   // nothing built, nothing to hide
+        }
+        no_server_badge_ = lv_label_create(lv_screen_active());
+        // The words say what is missing, not what went wrong. "NO LLM" is the
+        // sentence an owner can act on; "connection failed" is one they cannot,
+        // because there is no connection to fail yet.
+        lv_label_set_text(no_server_badge_, "NO LLM");
+        lv_obj_set_style_text_color(no_server_badge_, lv_color_hex(0xFFC46B), 0);
+        lv_obj_set_style_bg_color(no_server_badge_, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(no_server_badge_, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_all(no_server_badge_, 3, 0);
+        lv_obj_set_style_radius(no_server_badge_, 4, 0);
+        lv_obj_align(no_server_badge_, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
+    }
+    // Not raised to the foreground, for the reason in ApplyMuteBadge: the
+    // settings menu is a full-screen overlay and a badge over the row you are
+    // pressing is worse than a badge you cannot see for a moment.
+    if (want) {
+        lv_obj_clear_flag(no_server_badge_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(no_server_badge_, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -801,8 +847,11 @@ void StackyFace::Tick() {
     }
 
     // Before the early return below: a muted robot must show it whatever else
-    // he is doing, including asleep behind the screensaver.
+    // he is doing, including asleep behind the screensaver. Same for a robot
+    // with nowhere to send what he hears - that state outlives every screen he
+    // might be showing.
     ApplyMuteBadge();
+    ApplyNoServerBadge();
 
     // Pick up a sleep transition requested from the timer task. All the LVGL
     // work happens HERE, in the LVGL task - see SetPowerSaveMode.

@@ -126,6 +126,19 @@ public:
     void SetMuted(bool muted);
     bool muted() const { return muted_; }
 
+    // 🧠 AND A ROBOT WITH NOWHERE TO THINK MUST LOOK LIKE ONE.
+    //
+    //    A prebuilt binary ships pointing at an address that cannot resolve, so
+    //    an owner who has not set theirs yet gets one startup alert and then a
+    //    robot that looks perfectly well: he wakes, he listens, he blinks, and
+    //    nothing happens - and the thing that would explain it scrolled away
+    //    minutes ago. He only tries the server again when woken, so there is not
+    //    even a repeating error to notice.
+    //
+    //    Same shape as the mute badge and for the same reason: the state is
+    //    persistent, so the evidence for it has to be persistent too.
+    void SetNoServer(bool no_server);
+
     // Public only so the expression table in the .cc can be a plain static
     // array at namespace scope. Nothing outside constructs these.
     struct EyeShape {
@@ -188,6 +201,8 @@ private:
     void BuildScreensaver();
     // Applies muted_want_. Called from Tick(), inside the LVGL task.
     void ApplyMuteBadge();
+    // Applies no_server_want_. Called from Tick(), inside the LVGL task.
+    void ApplyNoServerBadge();
     // Repaints the visible card from the status source.
     void PaintCard();
     void MakeEye(lv_obj_t* parent, Eye& eye, int centre_x);
@@ -208,6 +223,9 @@ private:
     // for the same reason - see SetMuted.
     volatile bool muted_want_ = false;
     bool muted_shown_ = false;
+    lv_obj_t* no_server_badge_ = nullptr;   // built lazily, like the mute badge
+    volatile bool no_server_want_ = false;  // written from any task
+    bool no_server_shown_ = false;          // read and written only by the LVGL task
     Eye left_, right_;
     lv_obj_t* brow_l_ = nullptr;
     lv_obj_t* brow_r_ = nullptr;

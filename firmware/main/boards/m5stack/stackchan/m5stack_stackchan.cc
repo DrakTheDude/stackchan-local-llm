@@ -1065,6 +1065,41 @@ private:
     }
 
     // Read once at boot, before anything opens the microphone.
+    // The server address as the firmware ACTUALLY resolves it: NVS first,
+    // compiled-in value as the fallback. Mirrors Ota::GetCheckVersionUrl, and
+    // exists so the About row and the NO LLM badge read the same thing - two
+    // places computing "which server" separately is two places to drift.
+    static std::string EffectiveServerUrl() {
+        Settings settings("wifi", false);
+        std::string server = settings.GetString("ota_url");
+        if (server.empty()) server = CONFIG_OTA_URL;
+        return server;
+    }
+
+    // 🧠 A ROBOT NOBODY HAS GIVEN A SERVER LOOKS EXACTLY LIKE A WORKING ONE.
+    //
+    //    The release binary ships pointing at a `.invalid` host, which can never
+    //    resolve - deliberately, so a forgotten setting fails closed instead of
+    //    dialling a stranger. Application says so once at startup and then stops
+    //    trying, which is right: an address that cannot resolve will not start
+    //    resolving on the fourth attempt. But it leaves an owner with a robot
+    //    that wakes, listens, blinks and does nothing, and the only explanation
+    //    scrolled off the screen minutes ago.
+    //
+    // ⚠️ SCOPE: this is "no server has ever been set", not "the server is
+    //    down". The placeholder is a fact about configuration, knowable without
+    //    a network, and it is checked here rather than inferred from a failed
+    //    connection - a robot whose server is merely unreachable is a different
+    //    state and deserves a different message, not this one worn as a lie.
+    void UpdateNoServerBadge() {
+        if (face_ == nullptr) return;
+        const std::string url = EffectiveServerUrl();
+        const bool unset = url.empty() || url.find(".invalid") != std::string::npos;
+        ESP_LOGI(TAG, "server %s (%s)", unset ? "NOT SET - showing the NO LLM badge" : "configured",
+                 url.c_str());
+        face_->SetNoServer(unset);
+    }
+
     void LoadPrivacySettings() {
         Settings settings("stackchan", false);
         mic_muted_ = settings.GetInt("mic_muted", 0) != 0;
@@ -1132,12 +1167,9 @@ private:
         };
 
         a.about_rows = [this]() {
-            // The server address as the firmware ACTUALLY resolves it - NVS
-            // first, compiled value as the fallback - rather than as configured.
-            // "Which server is he really using" is the question this answers.
-            Settings settings("wifi", false);
-            std::string server = settings.GetString("ota_url");
-            if (server.empty()) server = CONFIG_OTA_URL;
+            // "Which server is he really using" is the question this answers,
+            // so it asks the same helper the NO LLM badge does.
+            std::string server = EffectiveServerUrl();
             // Trimmed to what somebody standing in front of the robot is
             // actually checking: which machine, on which port.
             //
@@ -1833,6 +1865,11 @@ public:
         if (face_ != nullptr) {
             face_->SetOnThinking([this](bool on) { head_.SetThinking(on); });
         }
+        // Here rather than in the constructor: face_ does not exist yet when
+        // LoadPrivacySettings runs, and a badge set on a null face is a setting
+        // that silently does nothing. Config-only, so once is enough - changing
+        // the address goes through Wi-Fi config mode, which reboots.
+        UpdateNoServerBadge();
         // After the tools, so an early MCP call cannot race the task creation.
         head_.StartMotion();
 

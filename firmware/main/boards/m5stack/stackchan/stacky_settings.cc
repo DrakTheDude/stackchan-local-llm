@@ -300,7 +300,15 @@ void StackySettings::BuildAbout() {
     lv_obj_set_scroll_dir(about_rows_, LV_DIR_VER);
 
     lv_obj_t* back = lv_button_create(about_);
+    // 🎨 STRIP IT FIRST, for the reason spelled out in AddRow - this is the
+    //    button that proves the point. It was the only object in this file
+    //    without this line, and setting bg_color on top of LVGL's default
+    //    button style leaves the default GRADIENT and shadow in place, so it
+    //    kept rendering stock blue on a black-and-lavender screen. The base
+    //    colour below was always right; it was never what you could see.
+    lv_obj_remove_style_all(back);
     lv_obj_set_size(back, LV_PCT(100), kRowHeight);
+    lv_obj_set_style_bg_opa(back, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(back, c_panel_, 0);
     lv_obj_set_style_bg_color(back, c_accent_, LV_STATE_PRESSED);
     lv_obj_set_style_radius(back, 6, 0);
