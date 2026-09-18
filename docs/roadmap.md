@@ -38,10 +38,14 @@ English-first board support, with every hardware assumption written down next to
   checks the amp answered and retries, the PY32 refuses to write a guess — but nothing here explains
   *why* the bus stalls. Candidates: the PMIC, contention from the LED latch, or the radio's power draw.
   Worth knowing before telling other people their hardware is fine.
-- ⬜ 🔑 **Per-unit servo calibration.** `scs_servo.h` hard-codes the reference unit's factory centre
-  (460 / 620) and a +14 pan trim. Another robot's centre will differ, and the tilt safety clamp is computed
-  around it — so this is a **safety** item, not cosmetic. Read each unit's own factory calibration, which
-  survives flashing the app partition.
+- ✅ **Per-unit servo calibration.** Each robot's factory centre is read from its own NVS at boot —
+  the keys `zero_pos_1` / `zero_pos_2`, found by searching the partition rather than by assuming a
+  namespace name, since the name belongs to the vendor's app and one sample is not a convention.
+  Flashing the app partition leaves NVS alone, so the values are there on every unit. The travel
+  limits are now spans around *that* centre, which was the safety part: tilt has only ~90° before a
+  mechanical stop. The old constants remain as a fallback that announces itself loudly. The separate
+  bench trim is `CONFIG_STACKCHAN_PAN_TRIM`, defaulting to 0 — it is per-unit and guessing makes it
+  worse. Verified: read `servo/460/620` on the reference unit, matching its disassembled backup.
 - ⬜ 🔑 **Server address configurable after flashing.** Today it's compiled in and upstream has no
   on-device setting, so a prebuilt `.bin` can't know the owner's server. Likely a field on the Wi-Fi setup
   page the robot already serves on first boot, stored in NVS, with the compiled value as a default. This

@@ -6,6 +6,31 @@ config OTA_URL
     help
         The application will access this URL to check for new firmwares and server address.
 
+config STACKCHAN_PAN_TRIM
+    int "StackChan pan trim (servo counts)"
+    default 0
+    range -60 60
+    help
+        Bench trim for YOUR robot's head, in servo counts, applied on top of the
+        factory centre the firmware reads from NVS.
+
+        The factory centre is per-unit and is read automatically. This is the
+        smaller, separate correction for an assembly that still sits a few
+        degrees off straight ahead once centred - a slightly rotated horn, say.
+
+        Positive moves the head to the right. At roughly 300 degrees per 1024
+        counts, one degree is about 3.4 counts; the reference unit needed +14.
+
+        Leave at 0 unless you have looked at your own robot and seen it sit off
+        centre. Guessing makes it worse.
+
+config STACKCHAN_TILT_TRIM
+    int "StackChan tilt trim (servo counts)"
+    default 0
+    range -60 60
+    help
+        As above, for tilt. Positive tilts the head up.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE

@@ -13,6 +13,11 @@
 #ifndef STACKCHAN_SCS_SERVO_H
 #define STACKCHAN_SCS_SERVO_H
 
+// Not decoration: the per-unit bench trim is a BUILD setting
+// (CONFIG_STACKCHAN_PAN_TRIM), and this header is included from files that do
+// not otherwise pull sdkconfig in.
+#include <sdkconfig.h>
+
 #include <driver/uart.h>
 #include <driver/gpio.h>
 #include <cstdint>
@@ -40,41 +45,45 @@
 #define SCS_ID_PAN          1
 #define SCS_ID_TILT         2
 
-// 🔴 PER-UNIT VALUES, FROM ONE ROBOT. RELEASE BLOCKER.
+// 🔴 THE CENTRE IS PER-UNIT AND IS READ FROM THE ROBOT'S OWN NVS.
 //
-//    Factory centre calibration read from the factory NVS of the reference
-//    unit. Another StackChan will almost certainly differ - and the safe travel
-//    limits below are computed around this centre, so on a different unit the
-//    head would sit off-centre AND the tilt clamp could land closer to a
-//    mechanical stop than intended.
+//    The factory sets each head's mechanical zero individually and stores it in
+//    NVS as `zero_pos_1` (pan) and `zero_pos_2` (tilt), as I32, in SCS 0-1023
+//    position units. They are in no datasheet, they differ between units, and
+//    they cannot be recovered once the flash is overwritten.
 //
-//    Before any public release these must come from each robot's OWN factory
-//    calibration, which survives flashing the app partition. See
-//    docs/roadmap.md, "Firmware and platform".
-#define SCS_ZERO_POS_PAN    460
-#define SCS_ZERO_POS_TILT   620
+//    Flashing the APP partition leaves NVS alone, so every robot still carries
+//    its own values - including robots this project has never seen. They are read
+//    at Initialize(); see LoadFactoryCentres() in scs_servo.cc.
+//
+// ⚠️ THIS IS A SAFETY MATTER, NOT COSMETICS. The travel limits are computed
+//    AROUND the centre. Using another unit's centre makes the head sit crooked,
+//    which is obvious - but it also shifts the tilt clamp, which is not, and
+//    tilt has only ~90 degrees before it reaches a mechanical stop.
+//
+//    The values below are the FALLBACK, for a robot whose factory calibration
+//    has been erased. They are the reference unit's, so on any other robot they
+//    are a guess - which is why the firmware says so, loudly, when it uses them.
+#define SCS_FALLBACK_ZERO_PAN   460
+#define SCS_FALLBACK_ZERO_TILT  620
 
-// Bench trim, measured on the reference unit: with pan commanded to 0 the
-// head sat ~4 degrees left of straight ahead. At 300deg/1024 counts that is
-// ~14 counts. Kept SEPARATE from the factory value above so the provenance of
-// each number stays visible - 460 is what the vendor stored, +14 is what we
-// measured. Positive counts move right (negative pan = left, per the tool).
-#define SCS_PAN_TRIM_COUNTS   14
-#define SCS_TILT_TRIM_COUNTS  0
+// Bench trim: the small correction for an assembly that still sits off straight
+// ahead once centred on its own factory zero. Kept SEPARATE from the factory
+// value so each number's provenance stays visible - the centre is what the
+// vendor measured, the trim is what you measured. Per-unit, so it is a build
+// setting rather than a constant; see CONFIG_STACKCHAN_PAN_TRIM in
+// Kconfig.projbuild. Positive counts move the head right.
+#define SCS_PAN_TRIM_COUNTS   CONFIG_STACKCHAN_PAN_TRIM
+#define SCS_TILT_TRIM_COUNTS  CONFIG_STACKCHAN_TILT_TRIM
 
-#define SCS_CENTER_PAN      (SCS_ZERO_POS_PAN  + SCS_PAN_TRIM_COUNTS)
-#define SCS_CENTER_TILT     (SCS_ZERO_POS_TILT + SCS_TILT_TRIM_COUNTS)
-
-// Position limits. 0..1023 is the electrical range; these are deliberately
-// tighter. Tilt has only ~90 degrees of travel and driving it into its
-// mechanical stop is the most plausible way to damage the unit, so it is
-// clamped hard around centre until real limits are measured on the bench.
+// Travel limits, as spans either side of whatever this unit's centre turns out
+// to be. 0..1023 is the electrical range; these are deliberately tighter. Tilt
+// has only ~90 degrees of travel and driving it into its mechanical stop is the
+// most plausible way to damage the unit.
 #define SCS_POS_MIN         0
 #define SCS_POS_MAX         1023
-#define SCS_PAN_SAFE_MIN    (SCS_ZERO_POS_PAN  - 250)
-#define SCS_PAN_SAFE_MAX    (SCS_ZERO_POS_PAN  + 250)
-#define SCS_TILT_SAFE_MIN   (SCS_ZERO_POS_TILT - 120)
-#define SCS_TILT_SAFE_MAX   (SCS_ZERO_POS_TILT + 120)
+#define SCS_PAN_SAFE_SPAN   250
+#define SCS_TILT_SAFE_SPAN  120
 
 class ScsServo {
 public:
@@ -100,6 +109,14 @@ public:
 
     // Clamp helper, exposed so callers can report what they actually did.
     static int ClampFor(uint8_t id, int position);
+
+    // This unit's centre for a servo: its factory zero plus the configured
+    // bench trim. Valid after Initialize(); before that it is the fallback.
+    static int CenterFor(uint8_t id);
+
+    // False when the factory calibration could not be read and the fallback
+    // centre is in use - which means the travel limits are a guess too.
+    static bool calibration_is_fallback();
 
 private:
     bool initialized_ = false;

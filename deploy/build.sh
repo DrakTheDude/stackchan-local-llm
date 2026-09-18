@@ -43,6 +43,15 @@ else
     echo "      placeholder. Fine for a compile check, not for a robot."
 fi
 
+# ⚠️ A NEW Kconfig OPTION DOES NOT REACH sdkconfig ON A PLAIN BUILD. Adding one
+#    and rebuilding fails with "CONFIG_FOO was not declared in this scope", which
+#    reads like a missing include and is not. Reconfigure when the Kconfig has
+#    moved, so nobody has to know that.
+if [[ main/Kconfig.projbuild -nt sdkconfig ]]; then
+    echo "note: Kconfig.projbuild is newer than sdkconfig - reconfiguring first"
+    idf.py -DSDKCONFIG_DEFAULTS="$DEFAULTS" reconfigure >/dev/null
+fi
+
 idf.py -DSDKCONFIG_DEFAULTS="$DEFAULTS" "${@:-build}"
 
 # The size check is the cheap way to catch the wrong-board build described above.

@@ -3,10 +3,113 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <nvs.h>
+#include <nvs_flash.h>
 #include <cstring>
 #include <algorithm>
 
 #define TAG "ScsServo"
+
+namespace {
+
+// This unit's factory centres. Start as the fallback and are replaced by the
+// robot's own values at Initialize(). File-scope rather than members because
+// ClampFor is static and is called from the motion task, which has no handle.
+int g_zero_pan = SCS_FALLBACK_ZERO_PAN;
+int g_zero_tilt = SCS_FALLBACK_ZERO_TILT;
+bool g_fallback = true;
+
+// 🔎 THE KEYS ARE FOUND BY SEARCHING, NOT BY NAMING A NAMESPACE.
+//
+//    The factory stores the calibration under namespace INDEX 2 - which is an
+//    internal NVS detail, not something nvs_open() accepts. The namespace's
+//    actual name belongs to the vendor's app and there is no reason to believe
+//    it is the same string on every production run.
+//
+//    So this walks every entry in the partition looking for the two key names,
+//    and opens whichever namespace they turn up in. Slower than opening a known
+//    namespace, and it runs once at boot; the alternative is a constant that is
+//    right on the units we have seen and silently wrong on the rest.
+//
+//    On the reference unit the namespace turns out to be called "servo" and the
+//    values read 460/620 - the same numbers the disassembly of its factory
+//    backup produced, which is what makes this a confirmation rather than a
+//    hopeful substitution. The name is recorded here as a fact about one robot,
+//    NOT hard-coded: one sample is not a naming convention.
+bool FindCalibrationNamespace(char* out_ns, size_t out_len) {
+    nvs_iterator_t it = nullptr;
+    esp_err_t err = nvs_entry_find(NVS_DEFAULT_PART_NAME, nullptr, NVS_TYPE_I32, &it);
+    while (err == ESP_OK && it != nullptr) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        if (strcmp(info.key, "zero_pos_1") == 0) {
+            strncpy(out_ns, info.namespace_name, out_len - 1);
+            out_ns[out_len - 1] = '\0';
+            nvs_release_iterator(it);
+            return true;
+        }
+        err = nvs_entry_next(&it);
+    }
+    if (it != nullptr) nvs_release_iterator(it);
+    return false;
+}
+
+// Reads this robot's own factory centres. Leaves the fallback in place, and says
+// so, if anything is missing - a wrong centre moves the travel limits with it.
+void LoadFactoryCentres() {
+    // Idempotent, and cheap insurance: this runs from the board constructor and
+    // must not report "no calibration" merely because it arrived before NVS was
+    // up. A false negative here silently swaps in another unit's travel limits.
+    const esp_err_t init = nvs_flash_init();
+    if (init != ESP_OK && init != ESP_ERR_NVS_NO_FREE_PAGES &&
+        init != ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS unavailable (%s) - cannot read factory calibration",
+                 esp_err_to_name(init));
+    }
+
+    char ns[NVS_KEY_NAME_MAX_SIZE + 8] = {0};
+    if (!FindCalibrationNamespace(ns, sizeof(ns))) {
+        ESP_LOGE(TAG, "no factory servo calibration in NVS - using the reference "
+                      "unit's centres (%d/%d). The head may sit off centre and the "
+                      "tilt limits are a GUESS on this robot.",
+                 SCS_FALLBACK_ZERO_PAN, SCS_FALLBACK_ZERO_TILT);
+        return;
+    }
+    nvs_handle_t h;
+    if (nvs_open(ns, NVS_READONLY, &h) != ESP_OK) {
+        ESP_LOGE(TAG, "found calibration in namespace '%s' but could not open it", ns);
+        return;
+    }
+    int32_t pan = 0, tilt = 0;
+    const esp_err_t e1 = nvs_get_i32(h, "zero_pos_1", &pan);
+    const esp_err_t e2 = nvs_get_i32(h, "zero_pos_2", &tilt);
+    nvs_close(h);
+
+    // Sanity, because a bad centre is worse than no centre: the value has to sit
+    // inside the electrical range with room for the travel limits either side.
+    const bool sane = e1 == ESP_OK && e2 == ESP_OK &&
+                      pan > SCS_PAN_SAFE_SPAN && pan < SCS_POS_MAX - SCS_PAN_SAFE_SPAN &&
+                      tilt > SCS_TILT_SAFE_SPAN && tilt < SCS_POS_MAX - SCS_TILT_SAFE_SPAN;
+    if (!sane) {
+        ESP_LOGE(TAG, "factory calibration in '%s' unusable (pan=%ld tilt=%ld) - "
+                      "keeping the fallback centres", ns, (long)pan, (long)tilt);
+        return;
+    }
+    g_zero_pan = pan;
+    g_zero_tilt = tilt;
+    g_fallback = false;
+    ESP_LOGI(TAG, "factory centres from NVS '%s': pan=%d tilt=%d (trim %+d/%+d)",
+             ns, g_zero_pan, g_zero_tilt, SCS_PAN_TRIM_COUNTS, SCS_TILT_TRIM_COUNTS);
+}
+
+}  // namespace
+
+int ScsServo::CenterFor(uint8_t id) {
+    return (id == SCS_ID_TILT) ? g_zero_tilt + SCS_TILT_TRIM_COUNTS
+                               : g_zero_pan + SCS_PAN_TRIM_COUNTS;
+}
+
+bool ScsServo::calibration_is_fallback() { return g_fallback; }
 
 ScsServo::ScsServo() {}
 
@@ -18,6 +121,10 @@ ScsServo::~ScsServo() {
 
 bool ScsServo::Initialize() {
     if (initialized_) return true;
+
+    // Before the bus, because everything below - centring, the travel clamps -
+    // is expressed relative to this unit's own zero.
+    LoadFactoryCentres();
 
     uart_config_t cfg = {};
     cfg.baud_rate = SCS_BAUD_RATE;
@@ -95,10 +202,15 @@ int ScsServo::ReadPacket(uint8_t* out, size_t out_len, int timeout_ms) {
 }
 
 int ScsServo::ClampFor(uint8_t id, int position) {
-    int lo = (id == SCS_ID_TILT) ? SCS_TILT_SAFE_MIN : SCS_PAN_SAFE_MIN;
-    int hi = (id == SCS_ID_TILT) ? SCS_TILT_SAFE_MAX : SCS_PAN_SAFE_MAX;
-    lo = std::max(lo, SCS_POS_MIN);
-    hi = std::min(hi, SCS_POS_MAX);
+    // Around THIS unit's factory zero, not around the trimmed centre: the trim
+    // is a cosmetic correction to where "straight ahead" points, and letting it
+    // shift the mechanical safety limits as well would be the wrong kind of
+    // tidy. The span is what the mechanism can take; the trim is where we aim
+    // inside it.
+    const int zero = (id == SCS_ID_TILT) ? g_zero_tilt : g_zero_pan;
+    const int span = (id == SCS_ID_TILT) ? SCS_TILT_SAFE_SPAN : SCS_PAN_SAFE_SPAN;
+    const int lo = std::max(zero - span, SCS_POS_MIN);
+    const int hi = std::min(zero + span, SCS_POS_MAX);
     return std::clamp(position, lo, hi);
 }
 
@@ -146,6 +258,6 @@ bool ScsServo::Ping(uint8_t id) {
 }
 
 void ScsServo::CenterAll() {
-    WritePosition(SCS_ID_PAN,  SCS_CENTER_PAN,  500);
-    WritePosition(SCS_ID_TILT, SCS_CENTER_TILT, 500);
+    WritePosition(SCS_ID_PAN,  CenterFor(SCS_ID_PAN),  500);
+    WritePosition(SCS_ID_TILT, CenterFor(SCS_ID_TILT), 500);
 }

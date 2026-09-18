@@ -82,12 +82,12 @@ bool StackChanHead::Initialize() {
 }
 
 int StackChanHead::DegToCount(uint8_t id, float deg) {
-    int zero = (id == SCS_ID_TILT) ? SCS_CENTER_TILT : SCS_CENTER_PAN;
+    int zero = ScsServo::CenterFor(id);
     return zero + static_cast<int>(std::lround(deg / kDegreesPerCount));
 }
 
 float StackChanHead::CountToDeg(uint8_t id, int count) {
-    int zero = (id == SCS_ID_TILT) ? SCS_CENTER_TILT : SCS_CENTER_PAN;
+    int zero = ScsServo::CenterFor(id);
     return (count - zero) * kDegreesPerCount;
 }
 
