@@ -82,6 +82,17 @@ public:
     virtual void SetPowerSaveLevel(PowerSaveLevel level) = 0;
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+
+    // Called once, when activation has finished and the device is ready to use.
+    // The default plays the success chime - exactly what Application used to do
+    // inline here - so every other board behaves as before.
+    //
+    // It is a seam because "ready" is a BOARD question. On hardware whose audio
+    // path is still settling at this moment, that chime goes into a speaker that
+    // is not open yet and is simply lost: it tells the owner nothing, and it
+    // hides a real fault behind a missing noise. A board that knows better can
+    // wait, check what actually came up, and make the sound mean something.
+    virtual void OnDeviceReady();
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

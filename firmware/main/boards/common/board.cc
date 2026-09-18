@@ -1,4 +1,5 @@
 #include "board.h"
+#include "application.h"
 #include "system_info.h"
 #include "settings.h"
 #include "display/display.h"
@@ -65,6 +66,12 @@ Camera* Board::GetCamera() {
 Led* Board::GetLed() {
     static NoLed led;
     return &led;
+}
+
+// The behaviour Application had inline, unchanged, for every board that does not
+// override it. See the note in board.h for why it is a seam.
+void Board::OnDeviceReady() {
+    Application::GetInstance().PlaySound(Lang::Sounds::OGG_SUCCESS);
 }
 
 std::string Board::GetSystemInfoJson() {

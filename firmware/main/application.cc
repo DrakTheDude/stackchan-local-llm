@@ -331,9 +331,12 @@ void Application::HandleActivationDoneEvent() {
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 
-    Schedule([this]() {
-        // Play the success sound to indicate the device is ready
-        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+    Schedule([&board]() {
+        // Tell the board the device is ready. The default implementation plays
+        // the success sound, exactly as this line used to - but a board whose
+        // audio path is still settling can wait and make the chime mean
+        // something instead of losing it. See Board::OnDeviceReady.
+        board.OnDeviceReady();
     });
 }
 

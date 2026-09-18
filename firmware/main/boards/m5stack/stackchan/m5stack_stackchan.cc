@@ -1183,6 +1183,79 @@ public:
     // The boot call: same work, but it always says what it found.
     void InitializePy32() { EnsureServoRail(nullptr, true); }
 
+    // 🔔 THE BOOT CHIME IS A TEST RESULT, NOT A DECORATION.
+    //
+    //    Upstream plays it the instant activation finishes, which on this board
+    //    is the same moment the shared I2C bus stalls and the audio chips go
+    //    unreachable. The chime was therefore played into a speaker that was not
+    //    open yet, and simply vanished - which is how a boot with a genuinely
+    //    dead amplifier and a boot with a busy bus sounded identical: silent.
+    //
+    //    So it waits until the hardware can answer for itself, and then says
+    //    which of two things happened:
+    //
+    //      success chime      speaker, microphone and servo rail all confirmed
+    //      exclamation        something did not come up - and the log says what
+    //
+    //    That makes the sound worth listening for. A missing chime now means
+    //    "the check never finished", which is itself information.
+    //
+    // ⚠️ It CANNOT wait for output_enabled(): the chime is the first thing that
+    //    opens the speaker, so that flag is false until after this runs. It asks
+    //    the chips directly instead - which is the better question anyway, since
+    //    an open that succeeded while the amp was unreachable is exactly the
+    //    failure being guarded against.
+    void OnDeviceReady() override {
+        // Its own task: the caller is the application main loop, this waits for
+        // seconds, and 4096 is room for the I2C work without going near the
+        // esp_timer task's 3584-byte stack.
+        xTaskCreate([](void* arg) {
+            static_cast<M5StackStackChanBoard*>(arg)->BootSelfCheck();
+            vTaskDelete(nullptr);
+        }, "boot_check", 4096, this, 3, nullptr);
+    }
+
+    void BootSelfCheck() {
+        auto* codec = static_cast<CoreS3AudioCodec*>(GetAudioCodec());
+
+        // Poll rather than sleep a fixed time: the stall is a few hundred
+        // milliseconds on a good boot and has run past a second on a bad one,
+        // and a fixed delay would either be too short or waste the difference.
+        constexpr int kTimeoutMs = 8000;
+        constexpr int kStepMs = 200;
+        bool amp = false, mic = false;
+        for (int waited = 0; waited < kTimeoutMs; waited += kStepMs) {
+            amp = codec->AmpResponds();
+            mic = codec->MicResponds();
+            if (amp && mic) {
+                if (waited > 0) {
+                    ESP_LOGI(TAG, "audio chips answered after %d ms", waited);
+                }
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(kStepMs));
+        }
+
+        // Settle. Both chips answering means the bus is free again; giving the
+        // codec's own open a clear run costs a quarter of a second once.
+        vTaskDelay(pdMS_TO_TICKS(250));
+
+        const bool rail = EnsureServoRail();
+        const bool ok = amp && mic && rail;
+
+        if (ok) {
+            ESP_LOGI(TAG, "boot self-check PASSED - speaker, mic and servo rail all up");
+        } else {
+            ESP_LOGE(TAG, "boot self-check FAILED - amp:%s mic:%s servo rail:%s",
+                     amp ? "ok" : "NO ANSWER", mic ? "ok" : "NO ANSWER",
+                     rail ? "ok" : "OFF");
+        }
+        // The exclamation is deliberately a different sound rather than silence.
+        // Silence is what a flat battery and a broken amplifier both sound like.
+        Application::GetInstance().PlaySound(
+            ok ? Lang::Sounds::OGG_SUCCESS : Lang::Sounds::OGG_EXCLAMATION);
+    }
+
     M5StackStackChanBoard() {
         InitializePowerSaveTimer();
         InitializeI2c();
