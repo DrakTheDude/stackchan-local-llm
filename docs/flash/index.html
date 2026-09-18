@@ -56,8 +56,11 @@
 <h2>Then</h2>
 <ol>
   <li>Plug the robot into this computer with a USB-C cable that carries <em>data</em>.</li>
-  <li>Press the button below and pick the serial port that appears — on Windows it is usually
-      <em>USB VCOM</em> rather than the JTAG entry.</li>
+  <li>Press the button below and pick the serial port. On Windows this robot offers two:
+      choose <strong>USB JTAG/serial debug unit</strong>, not <em>USB VCOM</em>.
+      <br><span style="color:var(--dim)">VCOM looks like the obvious one and does not get through —
+      the browser returns to this page without an error. The board's native USB port is the one that
+      works. Observed on one Windows machine; if yours differs, please say so.</span></li>
   <li><strong>Decline the erase</strong> when asked, as above.</li>
   <li>When it finishes, the robot restarts and serves a Wi-Fi network called
       <code>StackChan-XXXX</code>. Join it from a phone, give it your network, and put your server's
