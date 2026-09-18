@@ -13,14 +13,16 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 > **[Flash it from your browser](https://drakthedude.github.io/stackchan-local-llm/flash/)** — no toolchain, nothing to install — or build it
 > yourself from this tree.
 >
-> Verified on **one** StackChan. If you have one, reports from a second are the most useful thing you
-> could contribute. See [docs/roadmap.md](docs/roadmap.md).
+> Verified on **one** StackChan, and the model measurements on **one** GPU. If you have either, a
+> report from a second is the most useful thing you could contribute — see
+> [docs/roadmap.md](docs/roadmap.md), and [tools/model-bench](tools/model-bench) if it is the GPU.
 
 ## What it does
 
 | | |
 |---|---|
 | **Talks to you, locally** | wake word on the robot; speech-to-text, model and speech synthesis on a machine you own. Any OpenAI-compatible endpoint with tool calling — Ollama by default, llama.cpp for speed |
+| **Runs on the card you have** | fifteen models measured for tool calling, speed and VRAM, from 5 GB up. [What to run on yours](docs/model-floor.md) |
 | **Has a face** | drawn rather than played back: it blinks, holds your gaze, squints, reacts while he thinks and speaks, and the head moves with him |
 | **Uses tools** | [MCP](https://modelcontextprotocol.io) is the contract. Point him at Home Assistant or anything else with an MCP server, and an ambient status can drive his LED ring and idle screen |
 | **Takes photos** | metered and tone-mapped on the device, shown on his own screen. There is no cloud vision path, by construction |
@@ -33,6 +35,7 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 | **[Flash it from your browser](https://drakthedude.github.io/stackchan-local-llm/flash/)** | Chrome or Edge, a USB-C data cable, about two minutes. **Back up the factory firmware first** — the flasher cannot do that for you |
 | **[Quickstart](docs/quickstart.md)** | factory robot → local robot, the whole path including the server. Back up first; that step is not optional |
 | **[What you gain and lose](docs/stock-vs-local.md)** | honestly, against the firmware it shipped with. He will not dance any more |
+| **[Which model do you need](docs/model-floor.md)** | fifteen models measured on one card: tool calling, time to first spoken word, VRAM. Most of our guesses were wrong |
 | **[Check the privacy claim](docs/privacy.md)** | six checks you can run yourself, and what this does *not* protect you from |
 | **[Roadmap](docs/roadmap.md)** | what is done, what is next, and what is still verified on only one robot |
 

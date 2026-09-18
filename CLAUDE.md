@@ -49,7 +49,7 @@ drafts, comments, examples, and test fixtures:
 | **attribution** | "by Drax and Claude", built with Claude Code |
 | **upstream** | pinned on purpose. Bumping is a deliberate step, never a side effect |
 | **structure** | four pillars — firmware/platform, local AI stack, integration interface, reproducibility — plus verifiable privacy. See [docs/roadmap.md](docs/roadmap.md) |
-| **backends** | nothing model- or vendor-specific. The LLM is any OpenAI-compatible endpoint with tool calling; every pipeline stage is a setting |
+| **backends** | nothing model- or vendor-specific. The LLM is any OpenAI-compatible endpoint with tool calling; every pipeline stage is a setting. Which models actually work is measured, not assumed — [model floor](docs/model-floor.md) |
 | **integration** | **MCP is the contract** — no new API. It's what users already know, the server already mounts any MCP server, and it was proven end to end in the reference project |
 | **safety** | voice has no confirmation step — documented guidance is read-only tools by default, with an explicit allowlist for anything that acts |
 
@@ -61,6 +61,7 @@ drafts, comments, examples, and test fixtures:
 | `server/` | local AI stack | docker compose, patch scripts, English config |
 | `integrations/` | integration | *planned:* the status contract, reference status server, MCP examples |
 | `docs/` | reproducibility | [roadmap](docs/roadmap.md), [quickstart](docs/quickstart.md), [privacy checklist](docs/privacy.md), [stock vs local](docs/stock-vs-local.md), [characters](docs/characters.md), [model floor](docs/model-floor.md), [releasing](docs/releasing.md). Backup/restore and board variants still to come |
+| `tools/model-bench/` | reproducibility | measures whether a model can call tools, how fast it speaks and what it costs in VRAM. `sweep.sh` runs the lot against any Ollama. Results are committed: they are the evidence behind the model floor, and the table is generated from them |
 | `docs/flash/` | reproducibility | the browser flasher. Published by CI on a tag, from the binaries that tag built — never committed, so the page and the firmware cannot drift |
 
 ### Updating the upstream firmware base
@@ -86,6 +87,10 @@ Current base: **`66bf9f7`** (v2.4.1, 2026-08-04) — the revision the reference 
 - **The wake-word model is on the assets partition**, and its build rule ignores the SR config. Delete
   `build/generated_assets.bin` and flash assets after changing `CONFIG_SR_WN_*`. Exactly one `SR_WN_*` enabled.
 - **The wake phrase is sent to the model as the first user message.** Choose it for what it says.
+- 🔴 **Reasoning is the biggest latency term in the stack, and the usual way to switch it off does not
+  work.** `/no_think` in a prompt does nothing here — in the system prompt it makes the model think
+  *more* — and `think: false` on an OpenAI-compatible endpoint is accepted and ignored. Only Ollama's
+  own `/api/chat` honours it. The server currently does the first of these and believes it worked.
 - **Flash from native Windows**, not WSL — RTS/DTR don't survive usbip.
 
 **Server**

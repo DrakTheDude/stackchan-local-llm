@@ -20,6 +20,30 @@ Run against anything OpenAI-compatible:
     python3 bench.py --base-url http://127.0.0.1:8080/v1 --model qwen3-32b
     python3 bench.py --base-url http://127.0.0.1:11434/v1 --model qwen3:8b
 
+It reports four things per model:
+
+    tools                 share of scored attempts that did the right thing
+    time to first SPOKEN  word, which is not time to first token - a reasoning
+                          model emits its first token at once and says nothing
+    tok/s                 median, warm
+    VRAM                  and whether all of it fitted, via --ollama-host
+
+⚠️ FIVE WAYS THIS MEASUREMENT LIES, each found by publishing a wrong number
+   first. They are worth knowing before trusting any tool of this kind:
+
+   1. Too small a max_tokens gags a reasoning model. It spends the budget
+      thinking, returns EMPTY with finish_reason=length, and scores as though it
+      ignored its tools. One model read 56% that way and is a 100% model.
+   2. Single-turn scoring punishes prudence. A model that reads the volume
+      before setting it is mid-loop, not wrong; here a read-only first call
+      earns a second turn.
+   3. Time-to-first-token flatters reasoners, for the reason above.
+   4. The first request of a run measures your disk. Everything here is warm,
+      and the cold load is its own field.
+   5. A refused request is not a score of zero. Ollama returns HTTP 400 for a
+      model whose template has no tool support; that model was never allowed to
+      try, and printing 0% would be a slur rather than a result.
+
 Writes JSON next to itself and prints a table. No dependencies beyond the
 standard library, so it runs on a laptop without setting anything up.
 """
@@ -460,18 +484,17 @@ def main():
     p.add_argument("--temperature", type=float, default=0.75,
                    help="production default - test what you ship, not what flatters")
     p.add_argument("--timeout", type=int, default=180)
-    # 🔑 QWEN3 AND FRIENDS THINK BY DEFAULT, AND IT SHOWS UP AS LATENCY.
+    # 🔑 REASONING IS THE BIGGEST LATENCY TERM MEASURED HERE, so it gets a
+    #    switch - and the switch goes through Ollama's own /api/chat, because
+    #    that is the only place it was found to work. See call_native_no_think
+    #    for the four ways that do not.
     #
-    #    `/no_think` is the Qwen3 family's own switch, appended to the system
-    #    prompt. Models outside that family have never heard of it and simply
-    #    read it as a stray token, which is why it is safe to leave on for a
-    #    whole sweep - but the comparison it exists for is one model, both ways.
-    #
-    # ⚠️ It is recorded in the result file, because a score with reasoning and a
-    #    score without are two different measurements and mixing them in one
-    #    table is how a model gets credited with speed it does not have.
+    # ⚠️ The mode recorded in the result is the one MEASURED, not the one asked
+    #    for: a model that ignores the flag is written down as having ignored
+    #    it. Mixing a real no-think run with a pretend one in a single table is
+    #    how a model gets credited with speed it does not have.
     p.add_argument("--no-think", action="store_true",
-                   help="append /no_think to the system prompt (Qwen3 family)")
+                   help="turn reasoning off via Ollama's /api/chat (needs --ollama-host)")
     p.add_argument("--max-tokens", type=int, default=1200,
                    help="the shipped config's value. Lower it and reasoning models "
                         "score as though they cannot call tools")
@@ -479,7 +502,9 @@ def main():
     p.add_argument("--ollama-host", default=None,
                    help="e.g. http://127.0.0.1:11434 - asks /api/ps how much card "
                         "the model took and how much of it actually fit")
-    p.add_argument("--out", default=None)
+    p.add_argument("--out", default=None,
+                   help="defaults to result-<model>.json beside this script, with "
+                        "-nothink appended when reasoning was turned off")
     a = p.parse_args()
 
     if a.no_think and not a.ollama_host:
@@ -528,8 +553,11 @@ def main():
     for cid, prompt, expected, check in CASES:
         passes, notes = 0, []
         for _ in range(a.repeats):
-            system = SYSTEM + (" /no_think" if a.no_think else "")
-            messages = [{"role": "system", "content": system},
+            # The SAME system prompt in both modes. An earlier version appended
+            # " /no_think" here on top of the native switch, which did nothing
+            # to the thinking and everything to the comparison: the two runs
+            # were no longer differing in one variable.
+            messages = [{"role": "system", "content": SYSTEM},
                         {"role": "user", "content": prompt}]
             try:
                 payload, elapsed = do_call(messages)

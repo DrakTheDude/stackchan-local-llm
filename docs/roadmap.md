@@ -19,7 +19,10 @@ servo calibration, and the server address is set on the robot rather than compil
 **Packaging is done too.** Tagged builds are produced by CI, asserted against the chip, the board, the
 OTA URL and the *contents* of the assets partition, and published with a
 [browser flasher](https://drakthedude.github.io/stackchan-local-llm/flash/) that writes each part at its own offset so a robot keeps its factory servo
-calibration. What is left is honest numbers for which models are actually good enough.
+calibration. And the model floor is measured: fifteen models, tool calling, speed and VRAM, in
+[model-floor.md](model-floor.md).
+
+**What is left is other people's hardware.** Every number here comes from one robot and one GPU.
 
 ⚠️ **All of it is verified on exactly one robot.** Every hardware claim here — the I²C map, the servo
 rail, the camera's behaviour, the audio quirks — comes from a single unit. A report from a second one is
@@ -115,10 +118,23 @@ Wake word → STT → model → TTS, with every backend a setting rather than a 
   is a compose profile; both are configured and documented, with LM Studio as a commented third.
   Only llama.cpp is *verified* in daily use. The template requirement is written down because it
   is the usual reason a model "cannot call tools" — llama.cpp needs `--jinja`.
-- 🟡 🔑 **[Measure an honest model floor](model-floor.md).** The page exists and is explicit about the
-  split: one configuration verified (Qwen3-32B Q4, tool calls reliable, 33–34 tok/s) and the rest
-  reasoning rather than measurement. Still to do: actually run ~14B, ~8B and a ~4B and publish what
-  happens, failures included. Tool calling is what breaks first, and it breaks silently.
+- ✅ 🔑 **[An honest model floor](model-floor.md), measured.** Fifteen models on one RTX 4090:
+  tool-calling score, time to the first *spoken* word, tokens/second and VRAM, with failures published.
+  The guesses it replaced were wrong in the middle — `qwen3:8b` scores 100% where `qwen3:14b`, the
+  model this project shipped, manages 83%. Three things worth carrying elsewhere:
+  **size is not the variable** (a 24B scored 67% using 19.6 GB; a 3B scored 83% in 5.0 GB);
+  **reasoning costs the conversation and bought nothing here** (identical scores, up to 17 seconds of
+  silence before the first word); and **speed tracks *active* parameters**, so a 30B MoE generates at a
+  4B's rate. The harness needed five fixes first, each of which produced a confident wrong number —
+  they are documented at the foot of the page because none of them are specific to this project.
+- ⬜ **The same numbers on a second GPU.** [`tools/model-bench/sweep.sh`](../tools/model-bench/sweep.sh)
+  is one command against any Ollama; results from a smaller card are the most useful contribution to
+  this page.
+- ⬜ 🔴 **Make `think: false` real in the server.** Its Ollama provider prepends `/no_think` to the
+  user's message for any `qwen3*` model and calls the OpenAI-compatible endpoint — measured, neither
+  does anything, and the instruction is visible to the model as part of what the user said. Only
+  Ollama's own `/api/chat` honours it. Until that is patched the recommended default is a model that
+  does not reason at all.
 - ✅ **STT: English-only Whisper by default**, with the reason in the config: the provider never sends a
   language, so a multilingual model auto-detects per utterance and short ones are where that fails.
 - ✅ **TTS: Kokoro by default**, and the voice documented as a **loudness** decision rather than a taste

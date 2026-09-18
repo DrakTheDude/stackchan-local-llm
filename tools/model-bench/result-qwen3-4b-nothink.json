@@ -4,34 +4,36 @@
   "base_url": "http://127.0.0.1:11434/v1",
   "temperature": 0.75,
   "thinking": "off (verified)",
-  "cold_load_s": 2.7,
+  "cold_load_s": 4.5,
   "ttft_s": 0.11,
   "time_to_first_spoken_word_s": 0.11,
   "silence_s": 0.0,
   "max_tokens": 1200,
-  "tool_score": "14/18",
-  "tool_pct": 78,
+  "tool_score": "12/18",
+  "tool_pct": 67,
   "tools_supported": true,
-  "median_latency_s": 1.73,
-  "median_tok_s": 212.4,
+  "median_latency_s": 1.46,
+  "median_tok_s": 205.8,
   "resident_gb": 7.5,
   "vram_gb": 7.5,
   "on_gpu_pct": 100,
   "cases": [
     {
       "case": "direct",
-      "passes": 1,
+      "passes": 0,
       "of": 3,
       "notes": [
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
         "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
         "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure"
       ]
     },
     {
       "case": "indirect",
-      "passes": 1,
+      "passes": 0,
       "of": 3,
       "notes": [
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
         "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
         "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure"
       ]

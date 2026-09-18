@@ -40,21 +40,21 @@ arguments — and one case that exists to catch the opposite failure: a model th
 <!-- BENCH TABLE START -->
 | model | shape | tools | speaks after | tok/s | VRAM | fits |
 |---|---|---|---|---|---|---|
-| `qwen3:8b`<br>*thinking off* | dense, 8B | **100%** | 0.07 s | 131.7 | 10.0 GB | 12 GB |
+| `qwen3:8b`<br>*thinking off* | dense, 8B | **100%** | 0.07 s | 125.0 | 10.0 GB | 12 GB |
 | `mistral-nemo:12b` | dense, 12B | **100%** | 0.09 s | 101.4 | 12.4 GB | 16 GB |
-| `qwen3:14b`<br>*thinking off* | dense, 14B | **100%** | 0.09 s | 80.6 | 14.5 GB | 24 GB |
+| `qwen3:14b`<br>*thinking off* | dense, 14B | **100%** | 0.1 s | 80.1 | 14.5 GB | 24 GB |
+| `qwen3:30b-a3b`<br>*thinking off* | MoE, 30B / 3B active | **100%** | 0.1 s | 206.6 | 21.7 GB | 24 GB |
 | `granite4:small-h` | MoE, 32B / 9B active | **100%** | 0.32 s | 59.2 | 20.4 GB | 24 GB |
 | `gpt-oss:20b` | MoE, 21B / 3.6B active | **100%** | 0.34 s | 154.3 | 12.9 GB | 16 GB |
-| `qwen3:32b`<br>*thinking off* | dense, 32B | **100%** | 0.5 s | 9.4 | 22.9 GB<br>⚠️ 79% on GPU | more than 24 GB |
+| `qwen3:32b`<br>*thinking off* | dense, 32B | **100%** | 0.52 s | 9.3 | 22.9 GB<br>⚠️ 79% on GPU | more than 24 GB |
 | `qwen3:30b-a3b` | MoE, 30B / 3B active | **100%** | 1.07 s | 210.0 | 21.7 GB | 24 GB |
 | `qwen3:8b` | dense, 8B | **100%** | 2.24 s | 138.2 | 10.0 GB | 12 GB |
 | `qwen3:32b` | dense, 32B | **100%** | 17.38 s | 9.5 | 22.9 GB<br>⚠️ 79% on GPU | more than 24 GB |
-| `qwen3:30b-a3b`<br>*thinking off* | MoE, 30B / 3B active | **94%** | 0.07 s | 211.6 | 21.7 GB | 24 GB |
 | `granite4:micro` | dense, 3B | **83%** | 0.05 s | 209.3 | 5.0 GB | 6 GB |
 | `granite4:tiny-h` | MoE, 7B / 1B active | **83%** | 0.15 s | 122.4 | 4.7 GB | 6 GB |
 | `qwen3:14b` | dense, 14B | **83%** | 1.76 s | 83.1 | 14.5 GB | 24 GB |
-| `qwen3:4b`<br>*thinking off* | dense, 4B | **78%** | 0.11 s | 212.4 | 7.5 GB | 12 GB |
 | `qwen3:4b` | dense, 4B | **78%** | 4.35 s | 212.0 | 7.5 GB | 12 GB |
+| `qwen3:4b`<br>*thinking off* | dense, 4B | **67%** | 0.11 s | 205.8 | 7.5 GB | 12 GB |
 | `mistral-small3.2:24b` | dense, 24B | **67%** | 0.15 s | 54.1 | 19.6 GB | 24 GB |
 | `llama3.1:8b` | dense, 8B | **61%** | 0.06 s | 137.5 | 9.2 GB | 12 GB |
 | `granite3.3:8b` | dense, 8B | **22%** | 0.08 s | 120.3 | 10.6 GB | 12 GB |
@@ -66,6 +66,17 @@ arguments — and one case that exists to catch the opposite failure: a model th
 - `gemma3:12b` has **no tool support** in this runtime — every request came back `HTTP 400`. Its speed is measured without tools; it has no score because it was never allowed to try.
 - `deepseek-v2:16b` has **no tool support** in this runtime — every request came back `HTTP 400`. Its speed is measured without tools; it has no score because it was never allowed to try.
 <!-- BENCH TABLE END -->
+
+### How much to trust a number
+
+Three repeats per case, eighteen scored attempts per model, at the shipped temperature of 0.75 — so
+these are samples, not constants. One model here was measured twice by accident: `qwen3:4b` with
+reasoning off scored **78% and then 67%** on two independent runs.
+
+Read the table accordingly. **100% and 22% mean what they say**; a score in the middle is worth about
+±1 case per row, and the useful detail is *which* cases failed rather than the total. `qwen3:4b` fails
+`direct` and `indirect` every time — it will not call a setter with a parameter — and that is a stable
+fact about the model, while whether it scores 12 or 14 out of 18 is not.
 
 `tools` is the share of 18 scored attempts that did the right thing. **`speaks after` is the one to
 read for a robot you talk to**: not time to first token, but time to the first word the speaker would
