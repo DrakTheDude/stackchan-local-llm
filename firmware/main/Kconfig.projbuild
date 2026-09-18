@@ -6,6 +6,23 @@ config OTA_URL
     help
         The application will access this URL to check for new firmwares and server address.
 
+config CLOCK_12_HOUR
+    bool "Show the clock in 12-hour time"
+    default n
+    help
+        The idle screen shows the time. This displays it as "9:05 pm" instead of
+        "21:05".
+
+        Off by default, because 24-hour is right for most of the world and is
+        what this firmware has always done. Turn it on where that is the local
+        convention.
+
+        Not merely cosmetic: a 24-hour clock read by someone who expects a
+        12-hour one is silently wrong rather than obviously wrong. "05:59" was
+        read as an evening time during development, which turned a nine-hour
+        timezone misconfiguration into an apparent three-hour one and sent the
+        diagnosis off in the wrong direction.
+
 config WIFI_AP_SSID_PREFIX
     string "Setup access point name prefix"
     default "Xiaozhi"

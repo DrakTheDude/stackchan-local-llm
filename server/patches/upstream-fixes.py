@@ -18,6 +18,41 @@ from pathlib import Path
 ROOT = Path("/opt/xiaozhi-esp32-server")
 
 REPLACEMENTS = [
+    # 🕐 THE CLOCK THE MODEL IS SHOWN, because telling it to convert does not
+    #    work. The prompt substitutes {{current_time}} as "21:07" and the persona
+    #    then asks for spoken, twelve-hour time - and the model says "twenty one
+    #    oh seven" anyway. Same lesson as the Chinese farewell and the memory
+    #    example, for the third time in this project: A DEMONSTRATION BEATS AN
+    #    INSTRUCTION. A literal sitting in the context outranks a rule about it.
+    #
+    #    So the substitution itself changes shape, and the model is never shown a
+    #    24-hour clock in the first place.
+    #
+    # ⚠️ Driven by an ENVIRONMENT VARIABLE, not hard-coded. Twelve-hour time is a
+    #    local convention rather than an improvement, and this image is shared -
+    #    set CLOCK_12H=1 in compose where that is the convention, leave it unset
+    #    everywhere else and nothing changes.
+    (
+        "core/utils/current_time.py",
+        '    return datetime.now().strftime("%H:%M")',
+        '    import os\n'
+        '\n'
+        '    if os.environ.get("CLOCK_12H") == "1":\n'
+        '        # %I zero-pads ("09:05 PM"), which reads as a timestamp rather\n'
+        '        # than as something a person says. Strip it, lowercase the rest.\n'
+        '        return datetime.now().strftime("%I:%M %p").lstrip("0").lower()\n'
+        '    return datetime.now().strftime("%H:%M")',
+    ),
+    (
+        "core/utils/dialogue.py",
+        '                "{{current_time}}", datetime.now().strftime("%H:%M")',
+        '                "{{current_time}}",\n'
+        '                (\n'
+        '                    datetime.now().strftime("%I:%M %p").lstrip("0").lower()\n'
+        '                    if __import__("os").environ.get("CLOCK_12H") == "1"\n'
+        '                    else datetime.now().strftime("%H:%M")\n'
+        '                ),',
+    ),
     # 🔴 EVERY STREAMED CHUNK GETS ITS TRAILING SPACE EATEN, so words run
     #    together in what he SAYS, not just what the screen shows.
     #

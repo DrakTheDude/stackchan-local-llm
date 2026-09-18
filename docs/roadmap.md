@@ -79,14 +79,12 @@ English-first board support, with every hardware assumption written down next to
   The Wi-Fi portal is NOT the answer for either: its HTML lives in a managed component, so every field
   added there is a fork to maintain. It stays for what it is good at — the things you need *before* the
   robot is on the network.
-- ⬜ **Tokenise the on-screen styling, then ship a second skin.** A *skin* in the Winamp sense, not a
-  colour scheme: a theme gets to change shape and character, not just palette. The reference for this is a
-  System 7 treatment where the eyes go square, the chrome gets chunky borders and bitmap icons, and the
-  whole thing reads as a different machine — that is the bar, and it is also the test, because anything
-  the tokens cannot express shows up immediately as a value still hard-coded somewhere.
-  Today those values are constants spread across `stacky_face.cc`, `stackchan_leds.cc` and
-  `InitializeTheme()`. Pulling them into one named set turns "change how he looks" from a hunt into an
-  edit. Worth doing because a desk robot people own is a thing they will want to make theirs.
+- ⬜ 🎭 **[Characters — a skin for the whole robot](characters.md).** Not a colour scheme: look, motion,
+  light, voice and persona swapped *together*, so a character is a different robot to be in a room with
+  rather than a repaint. Design note written; nothing built. The prerequisite is tokenising the look and
+  motion constants currently spread across `stacky_face.cc`, `stackchan_head.cc`, `stackchan_leds.cc` and
+  `InitializeTheme()` — and the hard part is that a character **spans two machines**, since look and motion
+  live on the robot while voice and persona live in server config.
 
 ## 2. Local AI stack ⬜
 

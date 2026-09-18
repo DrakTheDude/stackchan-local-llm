@@ -220,8 +220,24 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
             // Check if the we have already set the time
             if (tm->tm_year >= 2025 - 1900) {
                 char time_str[16];
+                // 24-hour by default, which is right for most of the world and
+                // is what this firmware has always done. A twelve-hour clock is
+                // a local convention rather than a better one, so it is a build
+                // setting instead of a change - see CONFIG_CLOCK_12_HOUR.
+                //
+                // %l rather than %I: space-padded, so it reads "9:05" and not
+                // "09:05 PM", and %P for a lowercase am/pm that fits a status
+                // line better than shouting it.
+#ifdef CONFIG_CLOCK_12_HOUR
+                strftime(time_str, sizeof(time_str), "%l:%M %P", tm);
+                // Trim the leading space %l leaves on single-digit hours.
+                const char* trimmed = time_str;
+                while (*trimmed == ' ') trimmed++;
+                SetStatus(trimmed);
+#else
                 strftime(time_str, sizeof(time_str), "%H:%M", tm);
                 SetStatus(time_str);
+#endif
             } else {
                 ESP_LOGW(TAG, "System time is not set, tm_year: %d", tm->tm_year);
             }
