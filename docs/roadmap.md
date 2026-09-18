@@ -56,12 +56,33 @@ English-first board support, with every hardware assumption written down next to
   IDs and per-unit calibration, LED chain order, camera sensor. Verified on one unit so far — say so.
 - ⬜ Board variants: a diagnostic mode that prints the I²C scan and rail / servo / codec checks, so a report
   from a different unit can be compared against a known-good one
-- ⬜ **Tokenise the on-screen styling, then ship a second theme.** Colours, spacing and the face's own
-  palette are currently constants spread across `stacky_face.cc`, `stackchan_leds.cc` and
+- ⬜ **A settings surface, because right now there are three and none of them is one.** Settings live in
+  the build (`Kconfig`), in NVS via the Wi-Fi portal's two fields, and in MCP tools the model can call —
+  so "change something" means rebuild, or re-enter config mode, or ask him out loud, depending on which
+  thing. Candidates that genuinely want a home: the **pan/tilt trim** (a rebuild today, and it is the one
+  number every owner has to set for their own robot), the ambient **status source** URL and token, screen
+  and standby timeouts, the **skin**, and the privacy switches — camera off, microphone muted — which are
+  exactly the settings this project should make visible rather than bury.
+  Shape, not yet decided, and there are two candidates:
+  - **On the robot's own screen**, reached by touch. The factory firmware had exactly this — volume, LEDs
+    and so on — so it is both prior art and what an owner will look for first. It needs no network, it
+    cannot be reached by anything else on the LAN, and it is the obvious home for a skin picker. It costs
+    LVGL work and screen real estate on a 320×240 panel.
+  - **A small page served on the LAN.** Easier to build rich controls in, and typable — useful for a
+    status-source URL nobody wants to enter with a touch keyboard. ⚠️ But it is a listening socket on a
+    device whose whole selling point is that it does not phone anywhere, so binding, authentication and
+    whether it is off by default are decisions to make deliberately, not afterwards.
+  The Wi-Fi portal is NOT the answer for either: its HTML lives in a managed component, so every field
+  added there is a fork to maintain. It stays for what it is good at — the things you need *before* the
+  robot is on the network.
+- ⬜ **Tokenise the on-screen styling, then ship a second skin.** A *skin* in the Winamp sense, not a
+  colour scheme: a theme gets to change shape and character, not just palette. The reference for this is a
+  System 7 treatment where the eyes go square, the chrome gets chunky borders and bitmap icons, and the
+  whole thing reads as a different machine — that is the bar, and it is also the test, because anything
+  the tokens cannot express shows up immediately as a value still hard-coded somewhere.
+  Today those values are constants spread across `stacky_face.cc`, `stackchan_leds.cc` and
   `InitializeTheme()`. Pulling them into one named set turns "change how he looks" from a hunt into an
-  edit, and a second theme proves the tokens are real rather than decorative — the same exercise done on
-  the reference project's web UI, where a System 7 theme was what shook out the values that had been
-  hard-coded. Worth doing because a desk robot people own is a thing they will want to restyle.
+  edit. Worth doing because a desk robot people own is a thing they will want to make theirs.
 
 ## 2. Local AI stack ⬜
 

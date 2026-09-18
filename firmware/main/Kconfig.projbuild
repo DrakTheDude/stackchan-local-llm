@@ -6,6 +6,19 @@ config OTA_URL
     help
         The application will access this URL to check for new firmwares and server address.
 
+config WIFI_AP_SSID_PREFIX
+    string "Setup access point name prefix"
+    default "Xiaozhi"
+    help
+        The robot serves its own Wi-Fi network for setup, named
+        "<prefix>-XXXX" where XXXX is the last two bytes of its MAC. The same
+        prefix becomes its DHCP hostname, so it is also what shows up in the
+        router's client list.
+
+        This is the name a new owner has to find on their phone, so it should
+        look like the thing they just bought. Upstream's default is kept here so
+        other boards are unaffected; this project's board sets its own.
+
 config STACKCHAN_PAN_TRIM
     int "StackChan pan trim (servo counts)"
     default 0

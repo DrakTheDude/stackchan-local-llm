@@ -924,31 +924,73 @@ private:
         return -1;
     }
 
+    // Three gestures, deliberately far apart in length so none of them can be
+    // reached on the way to another:
+    //
+    //   touch at all      wake the screen
+    //   tap, under 500ms  start or stop a conversation
+    //   hold 5 SECONDS    enter Wi-Fi configuration mode
+    //
+    // 🔑 THE HOLD IS THE ONLY WAY BACK TO THE SERVER ADDRESS. The address lives
+    //    in NVS and is set on the configuration portal, but the portal is only
+    //    served in config mode - and config mode is otherwise entered only when
+    //    there is no Wi-Fi saved, or when connecting times out. Without a
+    //    gesture, changing servers on a working robot means deliberately
+    //    breaking its Wi-Fi first. Every other board in the tree binds this to a
+    //    button; this one has a touchscreen instead.
+    //
+    // ⚠️ Five seconds is long ON PURPOSE. It is not a shortcut, it is a
+    //    deliberate act: it drops the conversation and takes the robot off the
+    //    network. Nobody should reach it by resting a thumb on the screen.
     void PollTouchpad() {
         static bool was_touched = false;
+        static bool hold_fired = false;
         static int64_t touch_start_time = 0;
-        const int64_t TOUCH_THRESHOLD_MS = 500;  // touches longer than this count as a long press
-        
+        constexpr int64_t kTapMs = 500;          // above this is not a tap
+        constexpr int64_t kConfigHoldMs = 5000;  // and this is the deliberate hold
+
         ft6336_->UpdateTouchPoint();
         auto& touch_point = ft6336_->GetTouchPoint();
-        
+        const int64_t now_ms = esp_timer_get_time() / 1000;
+
         // touch started
         if (touch_point.num > 0 && !was_touched) {
             was_touched = true;
-            touch_start_time = esp_timer_get_time() / 1000; // to milliseconds
+            hold_fired = false;
+            touch_start_time = now_ms;
             // Touching the robot wakes him. It did not before: touch only
             // reached ToggleChatState(), so waking depended on the app changing
             // power save level as a side effect. Poking a dark screen and
             // having nothing happen is the obvious thing a person tries first.
             power_save_timer_->WakeUp();
         }
+        // still held - has it been long enough to mean it?
+        else if (touch_point.num > 0 && was_touched && !hold_fired) {
+            if (now_ms - touch_start_time >= kConfigHoldMs) {
+                hold_fired = true;
+                // 🔴 NOT FROM HERE. This is the esp_timer task, whose stack is
+                //    CONFIG_ESP_TIMER_TASK_STACK_SIZE (3584 bytes), and
+                //    EnterWifiConfigMode draws a notification - LVGL work, with
+                //    std::string in it. Doing that here has crashed this device
+                //    before. Hand it to the application loop instead.
+                Application::GetInstance().Schedule([this]() {
+                    ESP_LOGI(TAG, "5s hold - entering Wi-Fi configuration mode");
+                    EnterWifiConfigMode();
+                });
+            }
+        }
         // touch released
         else if (touch_point.num == 0 && was_touched) {
             was_touched = false;
-            int64_t touch_duration = (esp_timer_get_time() / 1000) - touch_start_time;
-            
+            // The hold already acted, and acting again on release would toggle
+            // the chat state of a robot that is now leaving the network.
+            if (hold_fired) {
+                return;
+            }
+            const int64_t touch_duration = now_ms - touch_start_time;
+
             // only a short tap toggles chat
-            if (touch_duration < TOUCH_THRESHOLD_MS) {
+            if (touch_duration < kTapMs) {
                 auto& app = Application::GetInstance();
                 if (app.GetDeviceState() == kDeviceStateStarting) {
                     EnterWifiConfigMode();

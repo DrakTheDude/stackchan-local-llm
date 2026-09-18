@@ -54,7 +54,10 @@ void WifiBoard::StartNetwork() {
 
     // Initialize WiFi manager
     WifiManagerConfig config;
-    config.ssid_prefix = "Xiaozhi";
+    // The name a new owner hunts for on their phone, and the hostname their
+    // router shows. Configurable because it should look like the device they
+    // think they own; CONFIG_WIFI_AP_SSID_PREFIX keeps upstream's default.
+    config.ssid_prefix = CONFIG_WIFI_AP_SSID_PREFIX;
     config.language = Lang::CODE;
     config.show_ota_config = true;
     config.show_sleep_config = true;

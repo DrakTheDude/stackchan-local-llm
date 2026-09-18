@@ -31,9 +31,17 @@ CONFIG_LANGUAGE_EN_US=y
 #
 #      CONFIG_OTA_URL="http://<your-server>:8003/xiaozhi/ota/"
 #
-#    Setting it after flashing, without a rebuild, is planned - see
-#    docs/roadmap.md.
+#    IT CAN ALSO BE SET AFTER FLASHING, with no rebuild: hold the screen for
+#    five seconds to enter Wi-Fi setup, then Advanced -> Custom OTA URL. That
+#    value lives in NVS and wins over this one, which is what makes a prebuilt
+#    binary usable by somebody who never opens this file.
 CONFIG_OTA_URL="http://stackchan-server.invalid:8003/xiaozhi/ota/"
+
+# The setup network's name: "StackChan-XXXX", and the robot's hostname on the
+# router. Upstream defaults this to "Xiaozhi", which is the name of the server
+# project rather than of the thing on the desk - a new owner following the
+# quickstart would be looking for a network that does not sound like their robot.
+CONFIG_WIFI_AP_SSID_PREFIX="StackChan"
 
 # One scrolling caption line, not a wrapped block.
 #
