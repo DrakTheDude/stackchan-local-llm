@@ -423,6 +423,37 @@ void Application::CheckNewVersion() {
     int retry_delay = 10;  // Initial retry delay in seconds
 
     auto& board = Board::GetInstance();
+
+    // 🔑 AN UNCONFIGURED ROBOT IS NOT A BROKEN ONE, and from the screen they used
+    //    to be identical.
+    //
+    //    A prebuilt binary cannot know the owner's server, so it ships with a
+    //    `.invalid` address - a reserved TLD (RFC 2606) that can never resolve,
+    //    chosen precisely so a forgotten setting fails closed instead of dialling
+    //    somebody else's machine. The first thing that then happens is ten
+    //    rounds of "check failed, code=-1, url=..." with an error chime, which
+    //    tells the owner their new robot is broken. It is not: nobody has told it
+    //    where to go yet.
+    //
+    //    So say that, once, with the gesture that fixes it - and do not retry.
+    //    An address that cannot resolve will not start resolving on the fourth
+    //    attempt, and the retries only bury the message.
+    //
+    // ⚠️ The text is a literal rather than a Lang::Strings key, deliberately.
+    //    Adding a key means editing thirty-odd language files, and inventing
+    //    translations nobody here can check is worse than one honest English
+    //    sentence. Upstream can add the key properly; the alternative was to bury
+    //    an instruction inside a sentence that promises a retry that will not
+    //    happen.
+    if (ota_->GetCheckVersionUrl().find(".invalid") != std::string::npos) {
+        ESP_LOGE(TAG, "no server configured - the OTA URL is still the placeholder (%s)",
+                 ota_->GetCheckVersionUrl().c_str());
+        Alert(Lang::Strings::ERROR,
+              "No server set yet.\nHold the screen for 5 seconds, then open\n"
+              "Advanced -> Custom OTA URL.",
+              "cloud_off", Lang::Sounds::OGG_EXCLAMATION);
+        return;
+    }
     while (true) {
         auto display = board.GetDisplay();
         display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);

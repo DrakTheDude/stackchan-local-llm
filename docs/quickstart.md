@@ -90,28 +90,35 @@ looking. **Check these before re-reading your config.**
 
 ## 2. Put the firmware on the robot
 
-> ⚠️ **Today this means building it yourself**, because the server address is compiled in. Making it
-> settable after flashing — so a prebuilt binary can work for anyone — is the top item on
-> [the roadmap](roadmap.md), and it is what a browser-based flasher is waiting on.
+> ⚠️ **Today this means building it yourself**, because there are no published release binaries yet.
+> The *address* no longer has to be compiled in — see below — so prebuilt binaries and a browser-based
+> flasher are now packaging work rather than firmware work. See [the roadmap](roadmap.md).
+
+**You do not have to compile your server's address in.** The robot can be told where its server is
+after it is flashed, from its own setup page — so the same binary works for anybody. Building it
+yourself is currently required only because there are no published release binaries yet.
 
 Install [ESP-IDF v6.0.2](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/),
 then:
 
 ```bash
 cd firmware
-echo 'CONFIG_OTA_URL="http://YOUR_LAN_IP:8003/xiaozhi/ota/"' > sdkconfig.defaults.local
 ../deploy/build.sh
 ```
-
-`sdkconfig.defaults.local` is gitignored — it is your address, and it does not belong in a
-repository.
 
 > 🔴 **Always build through `deploy/build.sh`.** A plain `idf.py build` silently builds a *different
 > board* with upstream's cloud OTA URL baked in. It compiles, it flashes, it boots, and the only
 > outward sign is a binary a few hundred KB smaller. The script pins the `SDKCONFIG_DEFAULTS` list
 > and prints the resulting OTA URL so a wrong build is obvious.
 
-Check that output before flashing. It should be your address, not `api.tenclass.net`.
+The address it prints will be `stackchan-server.invalid` — that is correct and deliberate. `.invalid`
+is a reserved name that can never resolve, so a robot nobody has configured fails safely instead of
+dialling a stranger's machine. You will set the real one in §3.
+
+*(If you would rather bake it in — for a robot you flash often, say — put
+`CONFIG_OTA_URL="http://YOUR_LAN_IP:8003/xiaozhi/ota/"` in `firmware/sdkconfig.defaults.local`. That
+file is gitignored: it is your address and it does not belong in a repository. A value set on the
+robot still wins over it.)*
 
 Then flash. On Windows, do this **natively, not through WSL** — entering the ESP32 bootloader drives
 the RTS/DTR lines, and those do not survive USB forwarding:
@@ -120,18 +127,35 @@ the RTS/DTR lines, and those do not survive USB forwarding:
 idf.py -p <PORT> flash
 ```
 
-Only the app partition changes, so your Wi-Fi settings survive a reflash.
+Only the app partition changes, so your Wi-Fi settings — and your robot's factory servo calibration,
+which is unique to it and cannot be recovered — survive a reflash.
 
 ---
 
 ## 3. First run
 
-1. Power the robot on. On first boot it serves its own Wi-Fi setup page — join its access point and
-   give it your network.
-2. Wait for the boot chime. **It is a test result, not a decoration:** the success chime means the
+1. Power the robot on. With no Wi-Fi saved it serves its own setup network, **`StackChan-XXXX`**.
+   Join it from a phone and the setup page opens by itself.
+2. On **Wi-Fi Config**, give it your 2.4 GHz network.
+3. On **Advanced**, put your server in **Custom OTA URL**:
+
+   ```
+   http://YOUR_LAN_IP:8003/xiaozhi/ota/
+   ```
+
+   The same address as `HOST_LAN_IP` in §1 — and again, not `localhost`. Save.
+
+   > 🔑 **This is how you change servers later, too.** Hold a finger on the robot's screen for **five
+   > seconds** and he returns to this page. Without that, changing the address would mean breaking his
+   > Wi-Fi on purpose. It is five seconds because it is deliberate: it ends the conversation and takes
+   > him off the network. A quick tap still just starts a conversation.
+   >
+   > If you never set an address, he says so on screen rather than looping a connection error — a robot
+   > that has not been told where to go is not a broken one.
+4. Wait for the boot chime. **It is a test result, not a decoration:** the success chime means the
    speaker, microphone and servo rail were all confirmed working. A different, sharper sound means
    something did not come up, and the serial log names it.
-3. Say **"Hi, Stack Chan."**
+5. Say **"Hi, Stack Chan."**
 
 The wake word runs on the robot itself, not on the server — it works even while the network is down.
 Tapping the screen also starts a conversation.
@@ -147,7 +171,8 @@ Tapping the screen also starts a conversation.
 | What you see | What it usually is |
 |---|---|
 | Robot never connects; server looks fine | The firewall layer, not your config. On Windows/WSL see §1. Check `HOST_LAN_IP` matches `server.websocket` in the config |
-| Worked for weeks, now silent | This machine's IP changed. DHCP reservation, then update both files and reflash |
+| Worked for weeks, now silent | This machine's IP changed. Set a DHCP reservation, then hold his screen 5 s and update **Custom OTA URL** — no reflash needed |
+| "No server set yet" on screen | Exactly what it says: hold the screen 5 s, then Advanced → Custom OTA URL |
 | He hears you, answers on screen, no sound | Should be fixed — the amplifier can open while unreachable. If it persists, the serial log says `amp unreachable after 4 attempts` |
 | Screen says "listening", nothing is picked up | Same class of bug on the microphone, also fixed. Look for `ES7210 unreachable` in the log |
 | He talks over you | `min_silence_duration_ms` in the config. 900 ms lets you pause mid-sentence; upstream's 200 ms does not |

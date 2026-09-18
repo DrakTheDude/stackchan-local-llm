@@ -46,10 +46,14 @@ English-first board support, with every hardware assumption written down next to
   mechanical stop. The old constants remain as a fallback that announces itself loudly. The separate
   bench trim is `CONFIG_STACKCHAN_PAN_TRIM`, defaulting to 0 — it is per-unit and guessing makes it
   worse. Verified: read `servo/460/620` on the reference unit, matching its disassembled backup.
-- ⬜ 🔑 **Server address configurable after flashing.** Today it's compiled in and upstream has no
-  on-device setting, so a prebuilt `.bin` can't know the owner's server. Likely a field on the Wi-Fi setup
-  page the robot already serves on first boot, stored in NVS, with the compiled value as a default. This
-  blocks prebuilt binaries and the 30-minute path. Strong upstream candidate.
+- ✅ **Server address configurable after flashing.** Mostly already built upstream, which is worth
+  recording: `Ota::GetCheckVersionUrl()` reads `ota_url` from NVS with the compiled value as fallback,
+  the config portal has the field that writes it, and this tree already enabled the flag that shows it.
+  What was genuinely missing was a way back *in* — config mode is otherwise reached only with no saved
+  Wi-Fi or on a connect timeout — so changing servers meant breaking the Wi-Fi on purpose. A five-second
+  hold on the screen now enters setup. The robot also says "no server set yet" instead of looping a
+  connection error, and the setup network is `StackChan-XXXX` rather than upstream's `Xiaozhi-XXXX`.
+  **Prebuilt binaries and the browser flasher are no longer blocked on firmware — only on packaging.**
 - ⬜ Behaviour, documented: face and expressions, head motion and the thinking pose, LED ring states,
   camera (on-screen only), wake word ("Hi, Stack Chan" — runs on the robot, not the server)
 - ⬜ **Hardware assumptions, each with a way to verify it:** I²C device map, servo rail at `0x6F`, servo
