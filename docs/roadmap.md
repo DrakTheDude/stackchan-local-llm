@@ -52,6 +52,12 @@ English-first board support, with every hardware assumption written down next to
   IDs and per-unit calibration, LED chain order, camera sensor. Verified on one unit so far — say so.
 - ⬜ Board variants: a diagnostic mode that prints the I²C scan and rail / servo / codec checks, so a report
   from a different unit can be compared against a known-good one
+- ⬜ **Tokenise the on-screen styling, then ship a second theme.** Colours, spacing and the face's own
+  palette are currently constants spread across `stacky_face.cc`, `stackchan_leds.cc` and
+  `InitializeTheme()`. Pulling them into one named set turns "change how he looks" from a hunt into an
+  edit, and a second theme proves the tokens are real rather than decorative — the same exercise done on
+  the reference project's web UI, where a System 7 theme was what shook out the values that had been
+  hard-coded. Worth doing because a desk robot people own is a thing they will want to restyle.
 
 ## 2. Local AI stack ⬜
 
