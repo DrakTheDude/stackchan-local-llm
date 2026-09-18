@@ -34,6 +34,14 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 | **[Check the privacy claim](docs/privacy.md)** | six checks you can run yourself, and what this does *not* protect you from |
 | **[Roadmap](docs/roadmap.md)** | what is done, what is next, and what is still verified on only one robot |
 
+### Feels like a lot?
+
+It is — embedded firmware, Docker, a local model and a bit of networking, all at once. **You do not
+have to hold all of it.** [Doing this with an AI assistant riding along](docs/with-an-assistant.md)
+covers opening this repo in Claude Code or VS Code and letting it carry the parts you do not care
+about. The docs are written to be read by both of you, and that page also tells the assistant which
+steps it must *not* take on your behalf.
+
 ## Why
 
 The StackChan's factory "AI agent" firmware sends your voice to a remote service, with an always-on

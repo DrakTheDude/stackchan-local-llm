@@ -46,11 +46,13 @@ The upstream firmware can send camera frames to a vision endpoint for captioning
 cloud API, and it is the single worst leak available on this hardware — pictures of your room.
 
 ```bash
-grep -n "GetCamera" firmware/main/boards/m5stack/stackchan/m5stack_stackchan.cc
+grep -A2 "Camera\* GetCamera" firmware/main/boards/m5stack/stackchan/m5stack_stackchan.cc
 ```
 
-It returns `nullptr`, deliberately. The common code reaches `GetCamera()` from exactly two places and
-both are that path: the stock `take_photo` tool, and the code that stores whatever vision URL the
+**A pass looks like** a function body containing `return nullptr;` — nothing else. If it returns a
+camera object, the cloud vision path is reachable and the rest of this page does not hold.
+
+The common code reaches `GetCamera()` from exactly two places and both are that path: the stock `take_photo` tool, and the code that stores whatever vision URL the
 server offers. With `nullptr`, the tool is never registered and a vision URL is never even accepted.
 
 The camera still works — `self.camera.show_photo` captures and draws on the robot's own screen — it
@@ -61,14 +63,13 @@ simply has nowhere off-device to send anything.
 The server ships built-in tools the model may call, and three of them leave your network: a weather
 API, a news service, a web search. In `server/config.example.yaml`:
 
-```yaml
-Intent:
-  function_call:
-    functions: []      # empty = none of them load
+```bash
+grep -A2 "^Intent:" server/data/.config.yaml
 ```
 
-An empty list is a privacy control, not tidying. Leaving the key out is **not** the same as an empty
-list — the config merges over upstream's defaults, so an absent key means "use theirs".
+**A pass looks like** `functions: []` — an empty list, present. A pass is *not* the key being absent:
+an empty list is a privacy control, and the config merges over upstream's defaults, so an absent key
+means "use theirs".
 
 ## 4. Confirm your conversations are summarised locally
 
@@ -76,11 +77,15 @@ The memory feature summarises each conversation with an LLM. Upstream's default 
 a **cloud** provider, and because the config merges, omitting the key silently uses it — every
 conversation posted to an API to be summarised.
 
-```yaml
-Memory:
-  mem_local_short:
-    llm: Ollama        # must name YOUR entry, and must match selected_module.LLM
+```bash
+grep -A3 "^Memory:" server/data/.config.yaml
+grep -A8 "^selected_module:" server/data/.config.yaml | grep LLM
 ```
+
+**A pass looks like** both naming the same entry — e.g. `llm: Ollama` under `mem_local_short`, and
+`LLM: Ollama` under `selected_module`. If they differ, your conversations are being summarised by
+something other than the model you chose. If the `llm:` line is missing entirely, they are being
+summarised in the cloud.
 
 ## 5. Read the patch assertions
 
@@ -89,10 +94,13 @@ text it is replacing is still there, so an upstream change fails the build rathe
 restoring the original behaviour:
 
 ```bash
-grep -c "assert" server/patches/*.py
+grep -c "assert\|MISSING\|sys.exit" server/patches/*.py
 ```
 
-That is what stops the privacy-relevant patches from rotting quietly.
+**A pass looks like** a non-zero count for each file, and — more to the point — a *build that fails*
+when upstream moves. You can prove that one: change a search string in a patch to something that
+cannot match, run `docker compose build xiaozhi`, and watch it refuse. A patch kit that cannot fail is
+a patch kit that has already stopped working and not told you.
 
 ## 6. Watch the wire
 
@@ -103,8 +111,12 @@ evening:
 sudo tcpdump -n "host YOUR_ROBOT_IP and not host YOUR_SERVER_IP"
 ```
 
-Ideally: silence, apart from DHCP and ARP. Your router's client list will do the same job more
-crudely if you would rather not run tcpdump.
+**A pass looks like** near-silence: ARP, and DHCP renewals every few hours. Talk to the robot while it
+runs — a conversation should produce *nothing here at all*, because all of it goes to the server you
+excluded. Anything else, particularly a DNS lookup for a name you do not recognise, is worth
+investigating and worth an issue.
+
+Your router's client list will do the same job more crudely if you would rather not run tcpdump.
 
 ---
 
