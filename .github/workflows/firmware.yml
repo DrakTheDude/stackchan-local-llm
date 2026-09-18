@@ -21,7 +21,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write        # needed only by the release step
+  contents: write        # the release step
+  pages: write           # the flasher page
+  id-token: write        # deploy-pages requires this
 
 jobs:
   build:
@@ -113,6 +115,38 @@ jobs:
           name: firmware
           path: out/
 
+      # 🔴 THE BINARIES ARE SERVED FROM THE PAGES SITE, NOT FROM THE RELEASE.
+      #
+      #    GitHub release downloads send NO Access-Control-Allow-Origin header -
+      #    measured, on the real asset, after the browser flasher failed with
+      #    "NetworkError when attempting to fetch resource". So a page on
+      #    github.io cannot fetch them, however correct the URLs are.
+      #
+      #    Pages does send `access-control-allow-origin: *`, so the firmware
+      #    ships alongside the flasher page and the manifest uses RELATIVE paths.
+      #    Same origin, no CORS to satisfy.
+      #
+      # ⚠️ Built as an artefact rather than committed. Ten megabytes per release
+      #    in git history would be permanent, and none of it is source.
+      - name: Assemble the flasher site
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          cp docs/flash/index.html docs/flash/manifest.json site/
+          # Everything the manifest names, and nothing else. The merged image is
+          # deliberately NOT here: it erases NVS, and it has no business being
+          # one click away.
+          cp out/bootloader.bin out/partition-table.bin out/ota_data_initial.bin \
+             out/xiaozhi.bin out/generated_assets.bin site/
+          ls -la site
+
+      - uses: actions/upload-pages-artifact@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          path: site
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -154,3 +188,18 @@ jobs:
             put your server address under **Advanced → Custom OTA URL**.
 
             To change it later, hold a finger on his screen for **five seconds**.
+
+  # Separate job because deploy-pages must run on its own, with the Pages
+  # environment attached. It publishes what the build assembled: the flasher page
+  # and the exact binaries this tag produced, together, so the page can never
+  # offer a firmware that is not the one beside it.
+  pages:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
