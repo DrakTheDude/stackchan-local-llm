@@ -127,16 +127,49 @@ jobs:
           set -euo pipefail
           A=firmware/build/generated_assets.bin
 
-          if ! strings -n 6 "$A" | grep -qiE 'histackchan|wn9l'; then
-            echo "::error::No wake-word model in the assets partition - the robot would never hear its name"
-            echo "assets contains:"; strings -n 5 "$A" | grep -iE '\.(bin|png|json)$' | sort -u | head
+          # 🔴 `strings "$A" | grep -q PATTERN` IS A BROKEN CHECK, and it fails
+          #    in the direction that reads as a real defect.
+          #
+          #    grep -q exits the moment it matches and closes the pipe. strings
+          #    is still writing, so it takes SIGPIPE and dies with 141 - and
+          #    `pipefail` makes THAT the pipeline's status, not grep's 0. A match
+          #    therefore reports as a miss.
+          #
+          #    And it is size-dependent, which is the cruel part: when the output
+          #    fits in the pipe buffer strings finishes before grep exits and the
+          #    check passes. Measured on this project's own artefacts:
+          #
+          #      1.6MB  (correct)  strings | grep -q  -> exit 141   "missing"
+          #      200KB  (a slice)  strings | grep -q  -> exit 0     "present"
+          #
+          #    So it passes on a wrong, small assets partition and fails on the
+          #    right one. It blocked v0.1.3, which was correct.
+          #
+          #    Dump once, then grep the dump. No pipeline, nothing to kill.
+          strings -n 5 "$A" > /tmp/assets.txt
+
+          # ⚠️ And prove the reader produced something before believing anything
+          #    it reports absent. An unreadable artefact would otherwise fail
+          #    every assertion below with a message about the wrong thing.
+          if [ ! -s /tmp/assets.txt ]; then
+            echo "::error::Read no strings out of $A ($(stat -c %s "$A" 2>/dev/null || echo no) bytes)"
+            echo "::error::Every check below would be a false negative, so stopping here instead"
             exit 1
           fi
-          echo "wake-word model present"
+
+          if ! grep -qiE 'histackchan|wn9l' /tmp/assets.txt; then
+            echo "::error::No wake-word model in the assets partition - the robot would never hear its name"
+            echo "assets contains:"; grep -iE '\.(bin|png|json)$' /tmp/assets.txt | sort -u | head
+            exit 1
+          fi
+          # Print what MATCHED, not the first wn9-ish string in the file - the
+          # dump contains other models' data blobs and naming one of those in a
+          # green log is how you end up sure of a wake word you are not shipping.
+          echo "wake-word model present:$(grep -oiE '[a-z0-9_]*(histackchan|wn9l)[a-z0-9_]*' /tmp/assets.txt | sort -u | sed 's/^/ /' | tr -d '\n')"
 
           # The face is drawn from these. A build without them is not broken, but
           # it is not this project either.
-          if ! strings -n 5 "$A" | grep -q 'happy.png'; then
+          if ! grep -q 'happy.png' /tmp/assets.txt; then
             echo "::error::No emotion assets - the face would have nothing to show"
             exit 1
           fi

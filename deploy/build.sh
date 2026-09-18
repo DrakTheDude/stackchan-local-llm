@@ -78,7 +78,11 @@ NEED_RECONFIG=""
 [[ main/Kconfig.projbuild -nt sdkconfig ]] && NEED_RECONFIG="Kconfig.projbuild changed"
 if [[ -f build/CMakeCache.txt ]]; then
     # Any board source newer than the cache means the glob may be stale.
-    if find main/boards -name '*.cc' -newer build/CMakeCache.txt -print -quit | grep -q .; then
+    # Not `find ... | grep -q .`: grep -q exits on the first line, find takes
+    # SIGPIPE, and `pipefail` above turns a found file into a failed pipeline.
+    # `-quit` keeps the output to one line so it has never bitten here - but the
+    # same construct in CI blocked a correct release, so it goes.
+    if [[ -n "$(find main/boards -name '*.cc' -newer build/CMakeCache.txt -print -quit)" ]]; then
         NEED_RECONFIG="${NEED_RECONFIG:+$NEED_RECONFIG; }board sources changed"
     fi
 fi
