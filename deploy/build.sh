@@ -43,12 +43,27 @@ else
     echo "      placeholder. Fine for a compile check, not for a robot."
 fi
 
-# ⚠️ A NEW Kconfig OPTION DOES NOT REACH sdkconfig ON A PLAIN BUILD. Adding one
-#    and rebuilding fails with "CONFIG_FOO was not declared in this scope", which
-#    reads like a missing include and is not. Reconfigure when the Kconfig has
-#    moved, so nobody has to know that.
-if [[ main/Kconfig.projbuild -nt sdkconfig ]]; then
-    echo "note: Kconfig.projbuild is newer than sdkconfig - reconfiguring first"
+# ⚠️ TWO THINGS DO NOT REACH A PLAIN BUILD, and both fail in ways that read as
+#    something else entirely:
+#
+#    1. A NEW Kconfig OPTION. Adding one and rebuilding fails with "CONFIG_FOO
+#       was not declared in this scope", which looks like a missing include.
+#    2. A NEW SOURCE FILE. Board sources are picked up by a CMake glob, and a
+#       glob is evaluated at configure time - so a new .cc compiles into nothing
+#       and the build fails at the LINKER, with undefined references to functions
+#       you are looking straight at.
+#
+#    Both are one `reconfigure` away, so just notice and do it.
+NEED_RECONFIG=""
+[[ main/Kconfig.projbuild -nt sdkconfig ]] && NEED_RECONFIG="Kconfig.projbuild changed"
+if [[ -f build/CMakeCache.txt ]]; then
+    # Any board source newer than the cache means the glob may be stale.
+    if find main/boards -name '*.cc' -newer build/CMakeCache.txt -print -quit | grep -q .; then
+        NEED_RECONFIG="${NEED_RECONFIG:+$NEED_RECONFIG; }board sources changed"
+    fi
+fi
+if [[ -n "$NEED_RECONFIG" ]]; then
+    echo "note: reconfiguring first ($NEED_RECONFIG)"
     idf.py -DSDKCONFIG_DEFAULTS="$DEFAULTS" reconfigure >/dev/null
 fi
 

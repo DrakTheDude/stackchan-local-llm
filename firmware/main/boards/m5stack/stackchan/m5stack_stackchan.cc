@@ -1,6 +1,9 @@
 #include "stackchan_head.h"
 #include "stackchan_leds.h"
 #include "stacky_face.h"
+#include "stacky_settings.h"
+#include <esp_app_desc.h>
+#include <esp_netif.h>
 #include "status_source.h"
 #include "wifi_board.h"
 #include "cores3_audio_codec.h"
@@ -783,6 +786,23 @@ private:
     StackyFace* face_ = nullptr;
     EspVideo* camera_;
     esp_timer_handle_t touchpad_timer_;
+
+    // --- on-screen settings -------------------------------------------------
+    StackySettings settings_ui_;
+    bool settings_built_ = false;
+
+    // 🔴 LVGL HAS NO POINTER ON THIS BOARD, and that is deliberate rather than an
+    //    omission. Touch is polled on a timer and turned into gestures; nothing
+    //    in the conversation UI is meant to be tapped, and registering a pointer
+    //    would let stray taps scroll and click widgets that were never designed
+    //    for it.
+    //
+    //    The settings menu does need one. So there is an input device, it is
+    //    fed from the poll below rather than reading I2C on the LVGL task - one
+    //    reader for one chip - and it is DISABLED except while the menu is open.
+    lv_indev_t* touch_indev_ = nullptr;
+    volatile int32_t touch_x_ = 0, touch_y_ = 0;
+    volatile bool touch_down_ = false;
     PowerSaveTimer* power_save_timer_;
     // Optional ambient status - see status_source.h. Null in this build.
     StatusSource* status_ = nullptr;
@@ -953,6 +973,19 @@ private:
         auto& touch_point = ft6336_->GetTouchPoint();
         const int64_t now_ms = esp_timer_get_time() / 1000;
 
+        // Hand the coordinates to LVGL's input device. Only this poll ever talks
+        // to the FT6336; the read callback just reports what was last seen, so
+        // the chip has exactly one reader and none of it happens on the LVGL
+        // task. Harmless when the device is disabled, which is most of the time.
+        touch_x_ = touch_point.x;
+        touch_y_ = touch_point.y;
+        touch_down_ = touch_point.num > 0;
+
+        // While the menu is open the screen belongs to LVGL: taps are buttons
+        // and drags are sliders, not conversation gestures. The hold is still
+        // read below so it can also CLOSE the menu.
+        const bool in_settings = settings_ui_.visible();
+
         // touch started
         if (touch_point.num > 0 && !was_touched) {
             was_touched = true;
@@ -969,14 +1002,11 @@ private:
             if (now_ms - touch_start_time >= kConfigHoldMs) {
                 hold_fired = true;
                 // 🔴 NOT FROM HERE. This is the esp_timer task, whose stack is
-                //    CONFIG_ESP_TIMER_TASK_STACK_SIZE (3584 bytes), and
-                //    EnterWifiConfigMode draws a notification - LVGL work, with
-                //    std::string in it. Doing that here has crashed this device
-                //    before. Hand it to the application loop instead.
-                Application::GetInstance().Schedule([this]() {
-                    ESP_LOGI(TAG, "5s hold - entering Wi-Fi configuration mode");
-                    EnterWifiConfigMode();
-                });
+                //    CONFIG_ESP_TIMER_TASK_STACK_SIZE (3584 bytes), and building
+                //    or showing the menu is LVGL work with std::string in it.
+                //    Doing that here has crashed this device before. Hand it to
+                //    the application loop instead.
+                Application::GetInstance().Schedule([this]() { ToggleSettings(); });
             }
         }
         // touch released
@@ -989,6 +1019,13 @@ private:
             }
             const int64_t touch_duration = now_ms - touch_start_time;
 
+            // While the menu is up, a tap is a button press - LVGL has already
+            // dealt with it. Toggling the conversation as well would start him
+            // talking every time you moved a slider.
+            if (in_settings) {
+                return;
+            }
+
             // only a short tap toggles chat
             if (touch_duration < kTapMs) {
                 auto& app = Application::GetInstance();
@@ -999,6 +1036,80 @@ private:
                 app.ToggleChatState();
             }
         }
+    }
+
+    // Built on FIRST USE, not at boot. SetupUI() has not run when this board is
+    // constructed, so there is no screen to parent onto yet - and a menu nobody
+    // opens should not cost memory. By the time a finger has been held down for
+    // five seconds, the display is long since up.
+    void ToggleSettings() {
+        DisplayLockGuard lock(GetDisplay());
+        if (settings_ui_.visible()) {
+            settings_ui_.Hide();
+            if (touch_indev_ != nullptr) lv_indev_enable(touch_indev_, false);
+            ESP_LOGI(TAG, "settings closed");
+            return;
+        }
+        if (!settings_built_) {
+            settings_built_ = true;
+            settings_ui_.Build(MakeSettingsActions());
+        }
+        settings_ui_.Show();
+        if (touch_indev_ != nullptr) lv_indev_enable(touch_indev_, true);
+        ESP_LOGI(TAG, "settings opened");
+    }
+
+    StackySettings::Actions MakeSettingsActions() {
+        StackySettings::Actions a;
+        a.wifi_setup = [this]() { EnterWifiConfigMode(); };
+        a.self_check = [this]() {
+            // The same check the boot chime reports, on demand - which is what
+            // the factory firmware's "Hardware Test" was for. It takes seconds
+            // and ends in a sound, so it runs on its own task rather than
+            // freezing the menu.
+            xTaskCreate([](void* arg) {
+                static_cast<M5StackStackChanBoard*>(arg)->BootSelfCheck();
+                vTaskDelete(nullptr);
+            }, "self_check", 4096, this, 3, nullptr);
+        };
+        a.get_volume = [this]() { return GetAudioCodec()->output_volume(); };
+        a.set_volume = [this](int v) { GetAudioCodec()->SetOutputVolume(v); };
+        a.get_brightness = [this]() { return (int)GetBacklight()->brightness(); };
+        // permanent: the point of setting it here is that it survives the next
+        // time he dims and wakes.
+        a.set_brightness = [this](int v) {
+            GetBacklight()->SetBrightness((uint8_t)v, true);
+        };
+        a.about_text = [this]() {
+            // The server address as the firmware ACTUALLY resolves it - NVS
+            // first, compiled value as the fallback - rather than as configured.
+            // "Which server is he really using" is the question this answers.
+            Settings settings("wifi", false);
+            std::string server = settings.GetString("ota_url");
+            if (server.empty()) server = CONFIG_OTA_URL;
+
+            std::string out;
+            out += "Firmware  ";
+            out += esp_app_get_description()->version;
+            // Asked of esp_netif rather than of the Wi-Fi component: this is the
+            // address the router actually handed out, and it does not depend on
+            // whatever that component's API happens to look like.
+            char ip[24] = "not connected";
+            esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+            esp_netif_ip_info_t info;
+            if (netif != nullptr && esp_netif_get_ip_info(netif, &info) == ESP_OK &&
+                info.ip.addr != 0) {
+                snprintf(ip, sizeof(ip), IPSTR, IP2STR(&info.ip));
+            }
+            out += "\nAddress   ";
+            out += ip;
+            out += "\nServer    " + server;
+            out += "\nServos    ";
+            out += ScsServo::calibration_is_fallback() ? "FALLBACK calibration"
+                                                       : "factory calibration";
+            return out;
+        };
+        return a;
     }
 
     void InitializeFt6336TouchPad() {
@@ -1019,6 +1130,25 @@ private:
         
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &touchpad_timer_));
         ESP_ERROR_CHECK(esp_timer_start_periodic(touchpad_timer_, 20 * 1000));
+
+        // The pointer LVGL does not otherwise have. Created DISABLED: while the
+        // conversation UI is on screen, taps are gestures and nothing is meant
+        // to be clicked. The settings menu switches it on and off again.
+        //
+        // The read callback does no I2C - it reports what the poll above last
+        // saw, so the FT6336 keeps exactly one reader and the LVGL task never
+        // waits on the shared bus.
+        touch_indev_ = lv_indev_create();
+        lv_indev_set_type(touch_indev_, LV_INDEV_TYPE_POINTER);
+        lv_indev_set_user_data(touch_indev_, this);
+        lv_indev_set_read_cb(touch_indev_, [](lv_indev_t* indev, lv_indev_data_t* data) {
+            auto* board = static_cast<M5StackStackChanBoard*>(lv_indev_get_user_data(indev));
+            data->point.x = board->touch_x_;
+            data->point.y = board->touch_y_;
+            data->state = board->touch_down_ ? LV_INDEV_STATE_PRESSED
+                                             : LV_INDEV_STATE_RELEASED;
+        });
+        lv_indev_enable(touch_indev_, false);
     }
 
     void InitializeSpi() {

@@ -1,0 +1,270 @@
+#include "stacky_settings.h"
+
+#include "lvgl_display/lvgl_theme.h"
+
+#include <esp_log.h>
+
+#include <string>
+
+#define TAG "StackySettings"
+
+namespace {
+
+// 320x240, and the finger is the pointer. 44px rows are the smallest that can be
+// hit reliably without looking - below that you start aiming, and a settings
+// menu you have to aim at is worse than no settings menu.
+constexpr int kRowHeight = 44;
+constexpr int kPad = 8;
+
+// Every event callback gets the StackySettings through the button's user data,
+// so none of this needs a singleton.
+struct RowCtx {
+    StackySettings* self;
+};
+
+}  // namespace
+
+void StackySettings::Build(const Actions& actions) {
+    actions_ = actions;
+
+    // 🎨 From the theme, not from literals. See the header.
+    auto* theme = LvglThemeManager::GetInstance().GetTheme("dark");
+    if (theme != nullptr) {
+        c_bg_ = theme->background_color();
+        c_panel_ = theme->assistant_bubble_color();
+        c_text_ = theme->text_color();
+        c_dim_ = theme->system_text_color();
+        c_accent_ = theme->border_color();
+    } else {
+        // Only reachable if the theme was never registered, which would mean the
+        // display never came up either. Legible rather than correct.
+        c_bg_ = lv_color_black();
+        c_panel_ = lv_color_hex(0x202020);
+        c_text_ = lv_color_white();
+        c_dim_ = lv_color_hex(0x909090);
+        c_accent_ = lv_color_hex(0x808080);
+    }
+    // Said out loud because the first build came out in LVGL's default blue, and
+    // "the theme is wrong" and "the theme was never read" look identical on a
+    // panel across the room.
+    ESP_LOGI(TAG, "theme %s: bg=%06X panel=%06X text=%06X accent=%06X",
+             theme != nullptr ? "found" : "MISSING",
+             (unsigned)lv_color_to_u32(c_bg_) & 0xFFFFFF,
+             (unsigned)lv_color_to_u32(c_panel_) & 0xFFFFFF,
+             (unsigned)lv_color_to_u32(c_text_) & 0xFFFFFF,
+             (unsigned)lv_color_to_u32(c_accent_) & 0xFFFFFF);
+
+    root_ = lv_obj_create(lv_screen_active());
+    lv_obj_remove_style_all(root_);
+    lv_obj_set_size(root_, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(root_, c_bg_, 0);
+    lv_obj_set_style_bg_opa(root_, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(root_, 0, 0);
+    lv_obj_add_flag(root_, LV_OBJ_FLAG_HIDDEN);
+
+    BuildList();
+    BuildAbout();
+    lv_obj_add_flag(about_, LV_OBJ_FLAG_HIDDEN);
+
+    ESP_LOGI(TAG, "settings menu built (hidden)");
+}
+
+lv_obj_t* StackySettings::AddRow(const char* text, lv_event_cb_t cb) {
+    lv_obj_t* btn = lv_button_create(list_);
+    // 🎨 STRIP THE BUILT-IN STYLE FIRST. lv_button_create arrives dressed in
+    //    LVGL's default theme - a blue fill with a gradient and a shadow - and
+    //    setting a background colour on top of that leaves the rest of it in
+    //    place. The first build of this menu came out looking like stock LVGL
+    //    rather than like this robot. Start from nothing, then say everything.
+    lv_obj_remove_style_all(btn);
+    lv_obj_set_size(btn, LV_PCT(100), kRowHeight);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(btn, c_panel_, 0);
+    lv_obj_set_style_bg_color(btn, c_accent_, LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn, 6, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+
+    lv_obj_t* label = lv_label_create(btn);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, c_text_, 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 4, 0);
+
+    static RowCtx ctx;   // one shared context is enough: `self` is a singleton
+    ctx.self = this;     // per board, and the callbacks only ever need `self`.
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, this);
+    return btn;
+}
+
+lv_obj_t* StackySettings::AddSlider(const char* text, int value, lv_event_cb_t cb,
+                                    lv_obj_t** out_value_label) {
+    // ⚠️ A SLIDER IS TALLER THAN ITS TRACK. The knob is drawn centred on the
+    //    track and overhangs it by roughly its own radius at top and bottom, so
+    //    a row sized to the track clips the knob - which is exactly the part you
+    //    are trying to touch. The first version did that. The row now reserves
+    //    room for the knob, and the slider sits inside that padding rather than
+    //    flush against the bottom edge.
+    constexpr int kKnob = 14;   // knob overhang either side of the track
+    lv_obj_t* row = lv_obj_create(list_);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, LV_PCT(100), kRowHeight + kKnob + 16);
+    lv_obj_set_style_bg_color(row, c_panel_, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(row, 6, 0);
+    lv_obj_set_style_pad_hor(row, 8, 0);
+    lv_obj_set_style_pad_ver(row, 6, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* label = lv_label_create(row);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, c_text_, 0);
+    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t* val = lv_label_create(row);
+    lv_label_set_text_fmt(val, "%d", value);
+    lv_obj_set_style_text_color(val, c_dim_, 0);
+    lv_obj_align(val, LV_ALIGN_TOP_RIGHT, 0, 0);
+    if (out_value_label != nullptr) *out_value_label = val;
+
+    lv_obj_t* slider = lv_slider_create(row);
+    lv_obj_remove_style_all(slider);
+    lv_obj_set_width(slider, LV_PCT(100));
+    lv_obj_set_height(slider, 8);
+    // Lifted clear of the bottom edge by the knob's overhang.
+    lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, -(kKnob / 2));
+    lv_slider_set_range(slider, 0, 100);
+    lv_slider_set_value(slider, value, LV_ANIM_OFF);
+
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, c_bg_, LV_PART_MAIN);
+    lv_obj_set_style_radius(slider, 4, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(slider, c_accent_, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(slider, 4, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_KNOB);
+    lv_obj_set_style_bg_color(slider, c_text_, LV_PART_KNOB);
+    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(slider, kKnob / 2, LV_PART_KNOB);
+
+    lv_obj_add_event_cb(slider, cb, LV_EVENT_VALUE_CHANGED, this);
+    return slider;
+}
+
+void StackySettings::BuildList() {
+    list_ = lv_obj_create(root_);
+    lv_obj_remove_style_all(list_);
+    lv_obj_set_size(list_, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_pad_all(list_, kPad, 0);
+    lv_obj_set_style_pad_row(list_, kPad, 0);
+    lv_obj_set_flex_flow(list_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_opa(list_, LV_OPA_TRANSP, 0);
+    // More rows than fit on 240px, so it scrolls - vertically only, or a
+    // sideways thumb-drag on a slider would carry the whole list with it. The
+    // extra bottom padding is so the last row can be dragged clear of the edge
+    // rather than sitting half off the screen at the end of the scroll.
+    lv_obj_set_scroll_dir(list_, LV_DIR_VER);
+    lv_obj_set_style_pad_bottom(list_, kRowHeight, 0);
+
+    // A title, so it is obvious this is not part of the conversation.
+    lv_obj_t* title = lv_label_create(list_);
+    lv_label_set_text(title, "Settings");
+    lv_obj_set_style_text_color(title, c_dim_, 0);
+
+    AddRow("Wi-Fi & server", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        // Hide first: entering config mode repaints the screen underneath, and
+        // leaving the menu on top of it would strand the user in a dead list.
+        self->Hide();
+        if (self->actions_.wifi_setup) self->actions_.wifi_setup();
+    });
+
+    const int vol = actions_.get_volume ? actions_.get_volume() : 50;
+    AddSlider("Volume", vol, [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        auto* slider = static_cast<lv_obj_t*>(lv_event_get_target(e));
+        const int v = lv_slider_get_value(slider);
+        if (self->volume_value_) lv_label_set_text_fmt(self->volume_value_, "%d", v);
+        if (self->actions_.set_volume) self->actions_.set_volume(v);
+    }, &volume_value_);
+
+    const int bright = actions_.get_brightness ? actions_.get_brightness() : 75;
+    AddSlider("Brightness", bright, [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        auto* slider = static_cast<lv_obj_t*>(lv_event_get_target(e));
+        const int v = lv_slider_get_value(slider);
+        if (self->bright_value_) lv_label_set_text_fmt(self->bright_value_, "%d", v);
+        if (self->actions_.set_brightness) self->actions_.set_brightness(v);
+    }, &bright_value_);
+
+    AddRow("Run self-check", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        if (self->actions_.self_check) self->actions_.self_check();
+    });
+
+    AddRow("About", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        if (self->actions_.about_text && self->about_label_) {
+            lv_label_set_text(self->about_label_, self->actions_.about_text().c_str());
+        }
+        lv_obj_add_flag(self->list_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(self->about_, LV_OBJ_FLAG_HIDDEN);
+    });
+
+    AddRow("Close", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        self->Hide();
+    });
+}
+
+void StackySettings::BuildAbout() {
+    about_ = lv_obj_create(root_);
+    lv_obj_remove_style_all(about_);
+    lv_obj_set_size(about_, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_pad_all(about_, kPad, 0);
+    lv_obj_set_style_pad_row(about_, kPad, 0);
+    lv_obj_set_flex_flow(about_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_opa(about_, LV_OPA_TRANSP, 0);
+
+    about_label_ = lv_label_create(about_);
+    lv_label_set_long_mode(about_label_, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(about_label_, LV_PCT(100));
+    lv_obj_set_style_text_color(about_label_, c_text_, 0);
+    lv_label_set_text(about_label_, "");
+
+    lv_obj_t* back = lv_button_create(about_);
+    lv_obj_set_size(back, LV_PCT(100), kRowHeight);
+    lv_obj_set_style_bg_color(back, c_panel_, 0);
+    lv_obj_set_style_bg_color(back, c_accent_, LV_STATE_PRESSED);
+    lv_obj_set_style_radius(back, 6, 0);
+    lv_obj_t* blabel = lv_label_create(back);
+    lv_label_set_text(blabel, "Back");
+    lv_obj_set_style_text_color(blabel, c_text_, 0);
+    lv_obj_center(blabel);
+    lv_obj_add_event_cb(back, [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        lv_obj_add_flag(self->about_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(self->list_, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_CLICKED, this);
+}
+
+void StackySettings::Show() {
+    if (root_ == nullptr || visible_) return;
+    // Always open on the list, never on whatever page was left showing.
+    lv_obj_add_flag(about_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(list_, LV_OBJ_FLAG_HIDDEN);
+    // Values may have changed by voice since this was last opened.
+    if (actions_.get_volume && volume_value_) {
+        lv_label_set_text_fmt(volume_value_, "%d", actions_.get_volume());
+    }
+    if (actions_.get_brightness && bright_value_) {
+        lv_label_set_text_fmt(bright_value_, "%d", actions_.get_brightness());
+    }
+    lv_obj_move_foreground(root_);
+    lv_obj_clear_flag(root_, LV_OBJ_FLAG_HIDDEN);
+    visible_ = true;
+}
+
+void StackySettings::Hide() {
+    if (root_ == nullptr || !visible_) return;
+    lv_obj_add_flag(root_, LV_OBJ_FLAG_HIDDEN);
+    visible_ = false;
+}
