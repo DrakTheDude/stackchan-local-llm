@@ -290,11 +290,16 @@ jobs:
             ## After flashing
 
             This binary does not know where your server is, deliberately — it ships
-            pointing at an address that cannot resolve. On first boot the robot serves
-            a setup network called **StackChan-XXXX**: join it, give it your Wi-Fi, and
-            put your server address under **Advanced → Custom OTA URL**.
+            pointing at an address that cannot resolve. Until you tell it otherwise the
+            log says `no server configured` and the robot talks to nobody.
 
-            To change it later, hold a finger on his screen for **five seconds**.
+            **A robot with no Wi-Fi saved** serves a setup network called
+            **StackChan-XXXX**: join it, give it your Wi-Fi, and put your server address
+            under **Advanced → Custom OTA URL**.
+
+            **A robot you declined the erase on** keeps its Wi-Fi, so it reconnects and
+            never offers that network. Set the address by holding a finger on his screen
+            for **five seconds** instead — which is also how you change it later.
 
   # Separate job because deploy-pages must run on its own, with the Pages
   # environment attached. It publishes what the build assembled: the flasher page

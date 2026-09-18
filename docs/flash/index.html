@@ -62,9 +62,21 @@
       the browser returns to this page without an error. The board's native USB port is the one that
       works. Observed on one Windows machine; if yours differs, please say so.</span></li>
   <li><strong>Decline the erase</strong> when asked, as above.</li>
-  <li>When it finishes, the robot restarts and serves a Wi-Fi network called
-      <code>StackChan-XXXX</code>. Join it from a phone, give it your network, and put your server's
-      address under <strong>Advanced → Custom OTA URL</strong>.</li>
+  <li>When it finishes, the robot restarts.
+      <ul>
+        <li><strong>A robot that has never had Wi-Fi</strong> serves a network called
+            <code>StackChan-XXXX</code>. Join it from a phone, give it your network, and put your
+            server's address under <strong>Advanced → Custom OTA URL</strong>.</li>
+        <li><strong>A robot you declined the erase on</strong> still has its Wi-Fi, so it just
+            reconnects and never offers that network. Set the server address by holding a finger on
+            his screen for five seconds instead.</li>
+      </ul></li>
+  <li><strong>Close this tab when you are done.</strong> The browser keeps the serial port claimed
+      for as long as the page is open, and nothing else can use it — not a serial monitor, not
+      esptool, not this page in a second tab.
+      <br><span style="color:var(--dim)">It fails as <em>access denied</em> or <em>port busy</em>,
+      which reads like a driver problem or a robot that has crashed. It is neither; it is this
+      page.</span></li>
 </ol>
 
 <div class="cta">
