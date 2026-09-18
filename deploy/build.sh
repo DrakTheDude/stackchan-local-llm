@@ -43,6 +43,26 @@ else
     echo "      placeholder. Fine for a compile check, not for a robot."
 fi
 
+# 🔴 THE TARGET IS PINNED, AND LEAVING IT OUT PUBLISHED A BINARY FOR THE WRONG CHIP.
+#
+#    With no existing sdkconfig - a clean checkout, which is every CI run and
+#    every new contributor - ESP-IDF defaults IDF_TARGET to `esp32`. It then
+#    loads sdkconfig.defaults.esp32 instead of .esp32s3, and the board choice
+#    falls through to BREAD_COMPACT_ESP32. The build SUCCEEDS. It produces a
+#    working firmware for a different chip and a different board.
+#
+#    v0.1.2 shipped exactly that. Nothing caught it: it compiled, the OTA URL
+#    check passed because the URL comes from the defaults file whatever the board
+#    is, and the only outward sign was an assets partition of 270KB instead of
+#    1.6MB - the "few hundred KB smaller" tell this script's own header warns
+#    about, finally seen in the wild.
+#
+# ⚠️ AND IT HAS TO BE ON EVERY idf.py CALL, not just the last one. Passing it to
+#    `build` while omitting it from the `reconfigure` above writes an esp32
+#    CMakeCache and then refuses to build against it - which is how the first
+#    attempt at this fix failed.
+IDF_ARGS=(-DIDF_TARGET=esp32s3 -DSDKCONFIG_DEFAULTS="$DEFAULTS")
+
 # ⚠️ TWO THINGS DO NOT REACH A PLAIN BUILD, and both fail in ways that read as
 #    something else entirely:
 #
@@ -64,10 +84,10 @@ if [[ -f build/CMakeCache.txt ]]; then
 fi
 if [[ -n "$NEED_RECONFIG" ]]; then
     echo "note: reconfiguring first ($NEED_RECONFIG)"
-    idf.py -DSDKCONFIG_DEFAULTS="$DEFAULTS" reconfigure >/dev/null
+    idf.py "${IDF_ARGS[@]}" reconfigure >/dev/null
 fi
 
-idf.py -DSDKCONFIG_DEFAULTS="$DEFAULTS" "${@:-build}"
+idf.py "${IDF_ARGS[@]}" "${@:-build}"
 
 # The size check is the cheap way to catch the wrong-board build described above.
 if [[ -f build/xiaozhi.bin ]]; then

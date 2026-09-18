@@ -85,6 +85,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # 🔴 THE BOARD AND THE CHIP, FIRST. v0.1.2 was published as an ESP32
+          #    build of a bread-board reference design, because a clean checkout
+          #    has no sdkconfig and IDF then defaults the target to esp32. Every
+          #    other check below passed on it, including the OTA URL - which
+          #    comes from the defaults file whatever board is selected, and so
+          #    could never have caught this.
+          target=$(grep -oP 'CONFIG_IDF_TARGET="\K[^"]+' firmware/sdkconfig)
+          board=$(grep -oE '^CONFIG_BOARD_TYPE_[A-Z0-9_]+=y' firmware/sdkconfig | head -1)
+          echo "target: $target"
+          echo "board:  $board"
+          [ "$target" = "esp32s3" ] || { echo "::error::Wrong chip: $target"; exit 1; }
+          [ "$board" = "CONFIG_BOARD_TYPE_M5STACK_STACKCHAN=y" ] \
+            || { echo "::error::Wrong board: $board"; exit 1; }
+
           url=$(grep -oP 'CONFIG_OTA_URL="\K[^"]+' firmware/sdkconfig)
           echo "built-in OTA URL: $url"
           case "$url" in
@@ -94,6 +109,46 @@ jobs:
           # And nothing should have crept in from a developer's machine.
           if grep -rqE '192\.168\.[0-9]+\.[0-9]+' firmware/sdkconfig; then
             echo "::error::sdkconfig contains a LAN address"; exit 1
+          fi
+
+      # 🔴 A BINARY THAT BUILDS IS NOT A BINARY THAT WORKS, and the first release
+      #    proved it: v0.1.2 compiled, passed every check, published, and could
+      #    not be woken by voice. Its assets partition was 270KB of one font
+      #    where it should have been 1.6MB including the wake-word model, because
+      #    three options lived only in a developer's gitignored sdkconfig.
+      #
+      #    Nothing in a compile can catch that. So the artefacts are inspected
+      #    for the things that make this robot a robot, and the job fails if they
+      #    are absent - which is cheaper than a stranger concluding their
+      #    microphone is broken.
+      - name: Assert the firmware can actually do its job
+        shell: bash
+        run: |
+          set -euo pipefail
+          A=firmware/build/generated_assets.bin
+
+          if ! strings -n 6 "$A" | grep -qiE 'histackchan|wn9l'; then
+            echo "::error::No wake-word model in the assets partition - the robot would never hear its name"
+            echo "assets contains:"; strings -n 5 "$A" | grep -iE '\.(bin|png|json)$' | sort -u | head
+            exit 1
+          fi
+          echo "wake-word model present"
+
+          # The face is drawn from these. A build without them is not broken, but
+          # it is not this project either.
+          if ! strings -n 5 "$A" | grep -q 'happy.png'; then
+            echo "::error::No emotion assets - the face would have nothing to show"
+            exit 1
+          fi
+          echo "face assets present"
+
+          # A blunt floor, caught in the one case that mattered: the bad build was
+          # 270KB. Anything near that is missing most of itself.
+          size=$(stat -c %s "$A")
+          echo "assets partition: $size bytes"
+          if [ "$size" -lt 1000000 ]; then
+            echo "::error::Assets partition is only $size bytes; a complete one is ~1.6MB"
+            exit 1
           fi
 
       - name: Collect artefacts

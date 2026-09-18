@@ -76,3 +76,27 @@ CONFIG_WIFI_AP_SSID_PREFIX="StackChan"
 # CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS is not set
 # CONFIG_SR_WN_WN9_JARVIS_TTS is not set
 CONFIG_SR_WN_WN9L_HISTACKCHAN_TTS3=y
+
+# 🔴 THESE THREE WERE MISSING, AND THE FIRST RELEASE SHIPPED WITHOUT A WAKE WORD.
+#
+#    They were set in a developer's sdkconfig - which is gitignored, and which
+#    accumulates state as you work - so every build on that machine had them and
+#    no build from a clean checkout did. The published v0.1.2 binary therefore
+#    carried a 270KB assets partition holding one font and an index, instead of
+#    the 1.6MB one holding srmodels.bin and the face's emoji.
+#
+#    A robot flashed from it hears nothing when you say "Hi, Stack Chan", and
+#    there is no way to tell that from a broken microphone by looking at it.
+#
+#    The lesson is not "add these three". It is that sdkconfig is not a record of
+#    anything: if a setting matters, it belongs in a defaults file that is
+#    committed. CI now asserts the assets actually contain the wake word, because
+#    the next setting to go missing this way will be a different one.
+CONFIG_USE_AFE_WAKE_WORD=y
+CONFIG_FLASH_DEFAULT_ASSETS=y
+
+# ⚠️ The wake phrase is ALSO the model's first user message - the firmware hands
+#    it over as if it had been spoken. Worth being explicit about rather than
+#    inheriting: it shapes the reply, and it is why the phrase was chosen for
+#    what it says to the model rather than only for how well it triggers.
+CONFIG_SEND_WAKE_WORD_DATA=y
