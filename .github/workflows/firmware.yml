@@ -1,0 +1,133 @@
+# Build the firmware, and publish it when a version tag is pushed.
+#
+# 🔴 WHAT MAKES A RELEASE BINARY SAFE TO HAND OUT: there is no
+#    sdkconfig.defaults.local here, so CONFIG_OTA_URL stays the
+#    `stackchan-server.invalid` placeholder. `.invalid` is a reserved name that
+#    can never resolve, so a robot flashed from a release dials NOBODY until its
+#    owner sets an address on the robot itself. A build that quietly baked in
+#    somebody's server would be the worst possible thing to publish, so the job
+#    below checks for that rather than trusting it.
+#
+# The build runs through deploy/build.sh for the same reason humans do: a plain
+# `idf.py build` silently builds a different board with upstream's cloud OTA URL.
+
+name: firmware
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: ["firmware/**", "deploy/**", ".github/workflows/firmware.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write        # needed only by the release step
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Pinned to the version this project is developed against. ESP-IDF minor
+    # releases move fast and the board's audio and camera paths are sensitive to
+    # component versions; bumping this is a deliberate change with a hardware
+    # test after it, not a convenience.
+    container: espressif/idf:v6.0.2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh" >/dev/null
+          deploy/build.sh
+
+      - name: Merge into one image for the browser flasher
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$IDF_PATH/export.sh" >/dev/null
+          cd firmware/build
+          # ⚠️ esptool with explicit offsets, NOT `idf.py merge-bin`. That target
+          #    triggers a full reconfigure, and a reconfigure is exactly where
+          #    this project's component resolution has been seen to fall over -
+          #    it broke a working tree once already. The offsets are the ones the
+          #    build itself reports in flash_args; if they ever change, this step
+          #    is where it should be noticed.
+          esptool --chip esp32s3 merge-bin \
+            -o stackchan-local-llm-merged.bin \
+            --flash-mode dio --flash-freq 80m --flash-size 16MB \
+            0x0 bootloader/bootloader.bin \
+            0x8000 partition_table/partition-table.bin \
+            0xd000 ota_data_initial.bin \
+            0x20000 xiaozhi.bin \
+            0x800000 generated_assets.bin
+
+      - name: Refuse to publish a binary pointing at somebody's server
+        shell: bash
+        run: |
+          set -euo pipefail
+          url=$(grep -oP 'CONFIG_OTA_URL="\K[^"]+' firmware/sdkconfig)
+          echo "built-in OTA URL: $url"
+          case "$url" in
+            *.invalid*) echo "placeholder, as it must be" ;;
+            *) echo "::error::Release binary has a real OTA URL baked in: $url"; exit 1 ;;
+          esac
+          # And nothing should have crept in from a developer's machine.
+          if grep -rqE '192\.168\.[0-9]+\.[0-9]+' firmware/sdkconfig; then
+            echo "::error::sdkconfig contains a LAN address"; exit 1
+          fi
+
+      - name: Collect artefacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cd firmware
+          cp build/xiaozhi.bin build/bootloader/bootloader.bin \
+             build/partition_table/partition-table.bin build/ota_data_initial.bin \
+             build/generated_assets.bin \
+             build/stackchan-local-llm-merged.bin ../out/
+          cd ../out
+          sha256sum * > SHA256SUMS
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: out/
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          body: |
+            ## Flashing
+
+            **The app only** (keeps your Wi-Fi, your server address and your robot's
+            factory servo calibration — all of which live in NVS):
+
+                esptool --chip esp32s3 -p PORT write-flash 0x20000 xiaozhi.bin
+
+            **Everything**, for a robot that has never run this firmware:
+
+                esptool --chip esp32s3 -p PORT write-flash \
+                  0x0 bootloader.bin \
+                  0x8000 partition-table.bin \
+                  0xd000 ota_data_initial.bin \
+                  0x20000 xiaozhi.bin \
+                  0x800000 generated_assets.bin
+
+            🔴 **Back up your factory firmware first.** M5Stack do not publish it, so
+            without a backup "put it back" stops being an option you have. See
+            [the quickstart](docs/quickstart.md).
+
+            ## After flashing
+
+            This binary does not know where your server is, deliberately — it ships
+            pointing at an address that cannot resolve. On first boot the robot serves
+            a setup network called **StackChan-XXXX**: join it, give it your Wi-Fi, and
+            put your server address under **Advanced → Custom OTA URL**.
+
+            To change it later, hold a finger on his screen for **five seconds**.

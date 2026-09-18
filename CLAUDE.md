@@ -11,13 +11,16 @@ By Drax and Claude. Built with Claude Code.
 
 ## Where this comes from
 
-This is the clean, public version of a private project (`stackchan-drax`, at `~/stackchan-drax` on the
-maintainer's machine). That repo made one StackChan a local voice front-end for a specific homelab, and
-**almost everything hard was solved and verified on hardware there**: the servo rail, the LED ring, the
-camera, the English passes over the server, memory, latency.
+This is the clean, public version of a private predecessor that made one StackChan a local voice
+front-end for a specific homelab. **Almost everything hard was solved and verified on hardware there**:
+the servo rail, the LED ring, the camera, the English passes over the server, memory, latency.
 
 **Port from it; don't copy it.** It is the reference implementation and its commit messages are the
 record of what was measured. But it is full of one person's setup, and none of that belongs here.
+
+That repo is private and stays private. It is not a place to send anyone, and its path on the
+maintainer's machine is deliberately not written down here — an instruction to go and read something
+nobody else can open is worse than no instruction.
 
 ## 🔴 Hard rule: everything committed here must be publishable
 

@@ -7,7 +7,21 @@ dist/
 .devcontainer/
 sdkconfig.old
 sdkconfig
-dependencies.lock
+
+# 🔴 THE LOCKFILE IS TRACKED HERE, unlike upstream. Deliberate divergence.
+#
+#    This project publishes binaries that other people flash onto hardware, so
+#    the same tag has to produce the same firmware. Resolving components freshly
+#    on every build means a component moving upstream can change what somebody
+#    installs without a single commit here - and the failure would show up as a
+#    hardware fault on a stranger's desk, not as a build error.
+#
+#    It is also not hypothetical: a fresh resolve on this machine left
+#    espressif/esp_h264 listed in the lock and not installed, which broke the
+#    configure with an error about a Kconfig symbol nobody had heard of.
+#    `idf.py update-dependencies` settled it.
+#
+# dependencies.lock   <- intentionally NOT ignored
 .env
 releases/
 main/assets/lang_config.h
