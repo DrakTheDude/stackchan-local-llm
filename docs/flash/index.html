@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flash StackChan · local LLM</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+<style>
+  :root { color-scheme: dark; --bg:#000; --panel:#1A1430; --text:#C9A9FF; --dim:#98A2B3; --accent:#A17EFF; --warn:#FF8E8E; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px 64px; background:var(--bg); color:var(--text);
+         font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width: 44rem; margin: 0 auto; }
+  h1 { font-size:1.6rem; margin:0 0 .25rem; }
+  h2 { font-size:1.1rem; margin:2rem 0 .5rem; color:#fff; }
+  p, li { color:#D8D4E8; }
+  .sub { color:var(--dim); margin-top:0; }
+  .panel { background:var(--panel); border:1px solid var(--accent); border-radius:10px;
+           padding:16px 18px; margin:20px 0; }
+  .warn { border-color:var(--warn); }
+  .warn strong { color:var(--warn); }
+  code { background:#0f0c1c; padding:1px 5px; border-radius:4px; color:var(--text); }
+  a { color:var(--accent); }
+  .cta { text-align:center; margin:28px 0 8px; }
+  esp-web-install-button[install-unsupported] { display:none; }
+  .unsupported { display:none; color:var(--warn); text-align:center; }
+  esp-web-install-button[install-unsupported] + .unsupported { display:block; }
+  footer { margin-top:40px; color:var(--dim); font-size:.9rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Flash your StackChan</h1>
+<p class="sub">Straight from this page. No toolchain, no command line.</p>
+
+<div class="panel warn">
+  <p><strong>⚠️ Back up your factory firmware first.</strong> M5Stack do not publish it. If you skip
+  this and later want the robot you bought, that option is gone — this is the one step you cannot
+  undo.</p>
+  <p>Use <a href="https://docs.m5stack.com/en/download">M5Burner</a> and save the full flash image
+  before flashing anything here. Keep that file off cloud sync: <strong>it contains your Wi-Fi
+  password in plain text.</strong></p>
+</div>
+
+<h2>Then</h2>
+<ol>
+  <li>Plug the robot into this computer with a USB-C cable that carries <em>data</em>.</li>
+  <li>Press the button below and pick the serial port that appears.</li>
+  <li>When it finishes, the robot restarts and serves a Wi-Fi network called
+      <code>StackChan-XXXX</code>. Join it from a phone, give it your network, and put your server's
+      address under <strong>Advanced → Custom OTA URL</strong>.</li>
+</ol>
+
+<div class="cta">
+  <esp-web-install-button manifest="manifest.json">
+    <button slot="activate" style="font:inherit;padding:12px 22px;border-radius:8px;border:0;
+      background:var(--accent);color:#120d20;font-weight:600;cursor:pointer">
+      Connect and flash
+    </button>
+  </esp-web-install-button>
+  <p class="unsupported">Your browser cannot talk to serial devices. Use Chrome or Edge on a
+     desktop — Safari and Firefox do not implement Web Serial, and it does not work on phones.</p>
+</div>
+
+<div class="panel">
+  <p><strong>This binary does not know where your server is, on purpose.</strong> It ships pointing at
+  an address that can never resolve, so a robot flashed here talks to nobody until you tell it who to
+  talk to. You will need
+  <a href="https://github.com/DrakTheDude/stackchan-local-llm#start-here">the server running</a>
+  on a machine of your own first.</p>
+  <p>To change the address later, hold a finger on his screen for <strong>five seconds</strong>.</p>
+</div>
+
+<h2>What you are installing</h2>
+<p>Firmware that turns the robot into a voice assistant answering to a model on your own network —
+face, head, LED ring, camera and wake word — with no cloud service involved. It replaces the factory
+launcher, so the dance and the app store go away;
+<a href="https://github.com/DrakTheDude/stackchan-local-llm/blob/main/docs/stock-vs-local.md">what you
+gain and lose</a> is written out honestly.</p>
+
+<footer>
+  <p>Verified on one robot. If yours behaves differently,
+  <a href="https://github.com/DrakTheDude/stackchan-local-llm/issues/new?template=second-robot.md">that
+  is the most useful thing you can report</a>.</p>
+  <p><a href="https://github.com/DrakTheDude/stackchan-local-llm">Source, docs and licence</a> · MIT</p>
+</footer>
+
+</main>
+</body>
+</html>

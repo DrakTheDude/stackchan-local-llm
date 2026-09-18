@@ -1,0 +1,17 @@
+{
+  "name": "StackChan local LLM",
+  "version": "latest",
+  "new_install_prompt_erase": false,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "https://github.com/DrakTheDude/stackchan-local-llm/releases/latest/download/bootloader.bin", "offset": 0 },
+        { "path": "https://github.com/DrakTheDude/stackchan-local-llm/releases/latest/download/partition-table.bin", "offset": 32768 },
+        { "path": "https://github.com/DrakTheDude/stackchan-local-llm/releases/latest/download/ota_data_initial.bin", "offset": 53248 },
+        { "path": "https://github.com/DrakTheDude/stackchan-local-llm/releases/latest/download/xiaozhi.bin", "offset": 131072 },
+        { "path": "https://github.com/DrakTheDude/stackchan-local-llm/releases/latest/download/generated_assets.bin", "offset": 8388608 }
+      ]
+    }
+  ]
+}

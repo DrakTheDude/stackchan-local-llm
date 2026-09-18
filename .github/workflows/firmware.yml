@@ -46,12 +46,24 @@ jobs:
           # Humans still run it directly, which is why the bit matters too.
           bash deploy/build.sh
 
-      - name: Merge into one image for the browser flasher
+      - name: Merge into one image, for a deliberate clean install
         shell: bash
         run: |
           set -euo pipefail
           . "$IDF_PATH/export.sh" >/dev/null
           cd firmware/build
+          # 🔴 THIS IMAGE ERASES NVS, AND THAT IS NOT WHAT MOST PEOPLE WANT.
+          #
+          #    A merged image spans 0x0 to the end of the assets partition and
+          #    pads every gap with 0xFF - and NVS lives at 0x9000-0xD000, in one
+          #    of those gaps. Writing it therefore wipes the robot's Wi-Fi, its
+          #    server address, and its FACTORY SERVO CALIBRATION, which is
+          #    per-unit and cannot be recovered once it is gone.
+          #
+          #    So it is published as a deliberate clean-slate option, and the
+          #    browser flasher does NOT use it - that writes each part at its own
+          #    offset so the gaps are left alone.
+          #
           # ⚠️ esptool with explicit offsets, NOT `idf.py merge-bin`. That target
           #    triggers a full reconfigure, and a reconfigure is exactly where
           #    this project's component resolution has been seen to fall over -
@@ -123,6 +135,12 @@ jobs:
                   0xd000 ota_data_initial.bin \
                   0x20000 xiaozhi.bin \
                   0x800000 generated_assets.bin
+
+            🔴 **`stackchan-local-llm-merged.bin` is not the same thing.** It is one
+            image written at `0x0`, and it **erases NVS** — your Wi-Fi, your server
+            address, and your robot's **factory servo calibration**, which is unique
+            to your unit and cannot be recovered. Use it only for a deliberate clean
+            slate. The commands above, and the browser flasher, leave NVS alone.
 
             🔴 **Back up your factory firmware first.** M5Stack do not publish it, so
             without a backup "put it back" stops being an option you have. See
