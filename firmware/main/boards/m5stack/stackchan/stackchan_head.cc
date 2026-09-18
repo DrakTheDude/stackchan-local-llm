@@ -181,6 +181,17 @@ int StackChanHead::MotionStep() {
     // runs - this is the loop that gets him back.
     if (!ready_) return kPollMs;
 
+    // 📷 Checked before EVERYTHING, startle included. A photo runs with exposure
+    //    pinned at the whole frame length, and any motion during it smears the
+    //    picture - so for that moment nothing gets to move the head, not a
+    //    glance and not a status alert. last_state_ is invalidated so the resting
+    //    pose is re-commanded when the hold lifts, rather than assumed to have
+    //    survived it.
+    if (hold_still_) {
+        last_state_ = -1;
+        return kPollMs;
+    }
+
     const int state = static_cast<int>(Application::GetInstance().GetDeviceState());
     const int64_t now = esp_timer_get_time();
 

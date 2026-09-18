@@ -89,6 +89,18 @@ public:
     // startle_stage_: one aligned word whose reader tolerates either value.
     void SetThinking(bool on) { thinking_ = on; }
 
+    // 📷 Face front and hold absolutely still, for a photo.
+    //
+    // Not only so he looks at the person: a still on this sensor runs with
+    // exposure pinned at the whole frame length, which is long enough that a
+    // head drifting through a glance during capture smears the picture. Holding
+    // still is part of the exposure, the same way it is on any camera with a
+    // slow shutter.
+    //
+    // Same volatile-flag treatment as thinking_ and startle_stage_ - written by
+    // whichever task is taking the photo, read by the motion task.
+    void HoldStill(bool on) { hold_still_ = on; }
+
 private:
     static void MotionTask(void* arg);
     // Returns how long to wait before the next step, in ms.
@@ -109,6 +121,7 @@ private:
     // buys anything here, and taking one on the main task would.
     volatile int startle_stage_ = 0;
     volatile bool thinking_ = false;
+    volatile bool hold_still_ = false;
     int think_stage_ = -1;      // -1 = not in the thinking script
     float think_pan_ = 0.0f;
     int64_t manual_until_us_ = 0;

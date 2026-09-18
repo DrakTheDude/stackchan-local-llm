@@ -206,6 +206,20 @@ constexpr uint8_t kGainReg = 0x50;
 constexpr uint8_t kGainMax = 0x60;   // the value the sweep actually exercised
 constexpr uint8_t kGainStep = 0x18;
 
+// ⏱️ HORIZONTAL BLANKING IS A DEAD LEVER HERE, and that is worth writing down so
+//    nobody spends an evening on it twice.
+//
+//    Exposure is counted in ROWS and both row-count levers are spent - VB is 8
+//    bits and pinned at 0xFF - so a LONGER ROW looked like the one remaining way
+//    to collect more light. It is not. Sweeping register 0x01 with everything
+//    else held:
+//
+//        HB=0x32:42   0x60:42   0xA0:39   0xFF:36
+//
+//    No improvement, drifting slightly the wrong way. Whatever ties this
+//    sensor's integration time to its frame, it is not the row length, so
+//    nothing here writes that register.
+
 i2c_master_dev_handle_t Dev(i2c_master_bus_handle_t bus) {
     static i2c_master_dev_handle_t dev = nullptr;
     static bool tried = false;
@@ -271,9 +285,31 @@ void SetExposure(i2c_master_bus_handle_t bus, int rows) {
     Wr(dev, 0x04, static_cast<uint8_t>(rows & 0xFF));
 }
 
+// 🔴 BITS 5:4 OF 0x50 MUST NOT BOTH BE ZERO, or the sensor stops producing
+//    pixels entirely - it emits a uniform mid-grey frame, which renders as a flat
+//    coloured rectangle and meters at exactly 128.
+//
+//    Measured, across every value a sweep tried, with no exceptions:
+//
+//        0x40 0x44 0x80 0xC0   bits 5:4 clear   ->  DEAD FRAME
+//        0x20 0x60 0x70 0x90 0xB0 0xFF          ->  real image
+//
+//    This is not a documented fact anywhere we can find; gc0308_regs.h does not
+//    even name 0x50 as a gain. It was found because the metering loop stepped
+//    0x14 -> 0x2C -> 0x44 and landed on one, and the whole photo came back green.
+//
+//    So the write is clamped up rather than refused: a caller asking for a value
+//    in that hole gets the nearest working one, and a photo, instead of a
+//    rectangle. Belt and braces - the metering path no longer drives gain at all
+//    (see the loop in RegisterCameraTool) - but this is the layer that knows why.
+constexpr uint8_t kGainFieldMask = 0x30;
+
 void SetGain(i2c_master_bus_handle_t bus, int g) {
     if (g < 0) g = 0;
     if (g > kGainMax) g = kGainMax;
+    if ((g & kGainFieldMask) == 0) {
+        g |= 0x10;
+    }
     Wr(Dev(bus), kGainReg, static_cast<uint8_t>(g));
 }
 
@@ -404,6 +440,33 @@ static int MeanLuma(const uint8_t* src, size_t len, v4l2_pix_fmt_t fmt) {
     return n ? static_cast<int>(sum / n) : -1;
 }
 
+// 🔴 MEAN LUMA CANNOT TELL A PICTURE FROM A BLANK SCREEN, and a sweep that
+//    reports only the mean will happily call the blank one a success.
+//
+//    A sensor putting out nothing usually puts out uniform mid-grey, which
+//    measures as mean 128 - almost exactly the number a well-exposed frame is
+//    driven towards. The first gain sweep returned 128 twice and it was
+//    impossible to tell which had happened.
+//
+//    The range settles it in one line: a real indoor scene spans most of 0-255,
+//    while a dead frame is a couple of values wide. Same lesson as the rest of
+//    this file - a diagnostic has to be able to report the bad news.
+static void LumaRange(const uint8_t* src, size_t len, v4l2_pix_fmt_t fmt, int* lo, int* hi) {
+    *lo = -1;
+    *hi = -1;
+    if (src == nullptr || len < 8) return;
+    if (fmt != V4L2_PIX_FMT_YUYV && fmt != V4L2_PIX_FMT_UYVY) return;
+    const size_t off = LumaEven(src, len) ? 0 : 1;
+    int mn = 255, mx = 0;
+    for (size_t i = off; i < len; i += 4) {
+        const int v = src[i];
+        if (v < mn) mn = v;
+        if (v > mx) mx = v;
+    }
+    *lo = mn;
+    *hi = mx;
+}
+
 // Returns a freshly allocated w*h*2 RGB565 (little-endian) buffer, or nullptr.
 // The caller owns it; hand it to LvglAllocatedImage and let that free it.
 //
@@ -491,41 +554,147 @@ static uint8_t* ToRgb565(const uint8_t* src, size_t src_len, int w, int h,
     //    Built as a 256-entry lookup table, so the per-pixel cost is one index
     //    no matter how elaborate the curve gets. 76800 pixels do not want a
     //    tanh() each.
+    // 🔴 A LINEAR GAIN TOWARD A MEAN IS THE WRONG CURVE FOR THIS SCENE, and it
+    //    was the actual cause of "bleached out, can barely see my head".
+    //
+    //    What the sensor really hands over, measured by sweeping its gain right
+    //    up to 0xFF with exposure pinned at the frame length:
+    //
+    //        g=0x60: mean 38, range [28-236]
+    //        g=0xFF: mean 50, range [28-254]
+    //
+    //    Note the RANGE. The frame is not uniformly dark - its highlights are
+    //    already at or near clipping while its mean sits around 40. That is a
+    //    high-dynamic-range room: something bright in shot (a window, a monitor,
+    //    a lamp) and a subject far darker than it.
+    //
+    //    The old curve multiplied everything by mean-to-target, capped at 2.0,
+    //    and rolled off the top. With a mean of 50 that is a flat 2x, so every
+    //    pixel above about 88 arrived at white - the bright half of the room
+    //    became a single sheet of paper - while the face, at luma 35, crawled up
+    //    to 83 and stayed dim and noisy. Both complaints in one operation.
+    //
+    //    So the gain is gone, and two measured things replace it:
+    //
+    //    1. A BLACK POINT, taken from the frame's own 1st percentile. There is a
+    //       pedestal here - the darkest pixel measured 28, never 0 - and lifting
+    //       an image without removing it turns black into milky grey, which is
+    //       the other half of what "bleached" describes.
+    //
+    //    2. A POWER CURVE whose exponent is SOLVED so the frame's own mean lands
+    //       on the target. Below 1 it lifts shadows hard while mapping 255 to
+    //       255 exactly, so it CANNOT clip - no knee needed, and the highlights
+    //       that used to be destroyed are simply left alone. For this frame it
+    //       works out near 0.35, which lifts the face further than the old 2x
+    //       did while bringing the lamp DOWN from 255 to about 248.
+    //
+    //    Percentiles need a histogram, and the histogram is free: the mean
+    //    already costs a full pass over the luma, so it is built in that pass.
     constexpr int kTargetMean = 112;   // slightly below mid: rooms are dim
-    constexpr float kMinGain = 0.45f;
-    constexpr float kMaxGain = 2.0f;
-    constexpr int kKnee = 176;         // where the highlight rolloff starts
-    constexpr float kGamma = 1.15f;    // >1 lifts shadows, opening up the dark half
+    constexpr float kMinExp = 0.30f;   // below this, shadows are mostly noise
+    constexpr float kMaxExp = 1.60f;
 
+    uint32_t hist[256] = {0};
     uint64_t luma_sum = 0;
     uint32_t hot = 0;
     for (size_t g = 0; g < groups; g++) {
         const int y = src[g * 4 + y0];
+        hist[y]++;
         luma_sum += y;
         if (y >= 250) hot++;
     }
     const int mean = groups ? static_cast<int>(luma_sum / groups) : kTargetMean;
 
-    float gain = mean > 0 ? static_cast<float>(kTargetMean) / mean : 1.0f;
-    if (gain < kMinGain) gain = kMinGain;
-    if (gain > kMaxGain) gain = kMaxGain;
+    // 1st and 99th percentile rather than min and max: a single hot or dead
+    // pixel must not set the range for the whole picture.
+    int black = 0, white = 255;
+    if (groups > 0) {
+        const uint32_t lo_at = static_cast<uint32_t>(groups / 100);
+        const uint32_t hi_at = static_cast<uint32_t>(groups - groups / 100);
+        uint32_t seen = 0;
+        for (int i = 0; i < 256; i++) {
+            seen += hist[i];
+            if (seen > lo_at) { black = i; break; }
+        }
+        seen = 0;
+        for (int i = 0; i < 256; i++) {
+            seen += hist[i];
+            if (seen >= hi_at) { white = i; break; }
+        }
+    }
+    // A flat frame is a dead frame, not a picture. The sensor intermittently
+    // returns uniform mid-grey - the gain sweep caught it twice, reading exactly
+    // mean 128 with a range of [128-128] - and stretching that produces a
+    // confident grey rectangle. Leave it alone and let the numbers say so.
+    const bool flat = (white - black) < 8;
+    if (flat) {
+        black = 0;
+        white = 255;
+    }
+
+    // 🔴 A BARE POWER CURVE IS VERTICAL AT THE BOTTOM, and at these exponents
+    //    that wrecks the shadows.
+    //
+    //    Solving for a mean of 34 gives an exponent near 0.33, and x^0.33 has
+    //    infinite slope at x=0: ONE input level above the black point came out at
+    //    60. Nothing can dither across a gap that size, and everything that lives
+    //    down there - sensor noise, mostly - got expanded with it. That is the
+    //    artefacting in the dark areas.
+    //
+    //    So the curve gets a TOE, the same idea as sRGB's linear segment: shift
+    //    the input away from the singularity by a small amount and renormalise,
+    //    which bounds the slope at black while leaving the midtone lift intact.
+    //    The same input level now arrives at 13 instead of 60.
+    constexpr float kToe = 0.05f;
+    auto curve = [](float x, float p) -> float {
+        const float lo = powf(kToe, p);
+        const float hi = powf(1.0f + kToe, p);
+        return (powf(x + kToe, p) - lo) / (hi - lo);
+    };
+
+    float exponent = 1.0f;
+    if (!flat) {
+        const float span = static_cast<float>(white - black);
+        float m = (static_cast<float>(mean) - black) / span;
+        if (m < 0.01f) m = 0.01f;
+        if (m > 0.99f) m = 0.99f;
+        const float t = static_cast<float>(kTargetMean) / 255.0f;
+        // Solved numerically rather than in closed form: the toe means the
+        // exponent that puts the mean on target is no longer just a ratio of
+        // logs, and twenty bisections of a monotonic function is nothing next to
+        // the per-pixel work that follows. Doing it in closed form against the
+        // curve we are NOT using is how a fix lands the mean in the wrong place.
+        float lo = kMinExp, hi = kMaxExp;
+        for (int i = 0; i < 20; i++) {
+            const float mid = 0.5f * (lo + hi);
+            // Smaller exponent lifts more, so the result falls as the exponent
+            // rises - hence the comparison this way round.
+            if (curve(m, mid) > t) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        exponent = 0.5f * (lo + hi);
+    }
+
     const unsigned long clip_pct = groups ? hot * 100 / groups : 0;
-    ESP_LOGI(TAG, "photo: mean luma %d, %lu%% at clip -> gain %.2f", mean, clip_pct, gain);
+    ESP_LOGI(TAG, "photo: mean %d range [%d-%d] %lu%% at clip -> exponent %.2f%s", mean, black,
+             white, clip_pct, exponent, flat ? " (FLAT - dead frame?)" : "");
     if (diag != nullptr) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "%dx%d %s luma=%s mean=%d clip=%lu%% gain=%.2f", w, h,
-                 declared_yuyv ? "YUYV" : "UYVY", luma_even ? "even" : "odd", mean, clip_pct, gain);
+        char buf[144];
+        snprintf(buf, sizeof(buf), "%dx%d %s luma=%s mean=%d blk=%d wht=%d clip=%lu%% exp=%.2f%s",
+                 w, h, declared_yuyv ? "YUYV" : "UYVY", luma_even ? "even" : "odd", mean, black,
+                 white, clip_pct, exponent, flat ? " FLAT" : "");
         *diag = buf;
     }
 
     uint8_t lut[256];
     for (int i = 0; i < 256; i++) {
-        float v = i * gain;
-        if (v > kKnee) {
-            v = kKnee + (255.0f - kKnee) * tanhf((v - kKnee) / (255.0f - kKnee));
-        }
-        v = 255.0f * powf(v / 255.0f, 1.0f / kGamma);
-        lut[i] = Clamp(static_cast<int>(v + 0.5f));
+        float x = (static_cast<float>(i) - black) / static_cast<float>(white - black);
+        if (x < 0.0f) x = 0.0f;
+        if (x > 1.0f) x = 1.0f;
+        lut[i] = Clamp(static_cast<int>(255.0f * curve(x, exponent) + 0.5f));
     }
 
     // Chroma has to move with the luma or the colour drifts. YUV encodes
@@ -533,7 +702,44 @@ static uint8_t* ToRgb565(const uint8_t* src, size_t src_len, int w, int h,
     // leaving U and V alone makes everything look lurid, and brightening it
     // makes everything look washed out. Scale the colour differences by however
     // much the curve moved a typical pixel. 8.8 fixed point.
-    const int cscale = mean > 0 ? (lut[mean] * 256 / mean) : 256;
+    //
+    // ⚠️ BUT CAPPED, and the cap is why the picture stopped looking like an old
+    //    16-colour monitor. The shadow lift is far stronger than the old linear
+    //    gain ever was - mean 34 arriving at 112 is 3.3x - and following it with
+    //    chroma drives U and V into clipping across most of the frame. Clipped
+    //    chroma is not "more colourful": every subtle shade collapses onto the
+    //    same few saturated corners, which is exactly what posterisation looks
+    //    like. The old code never hit this because its gain was capped at 2.0,
+    //    so this cap is not new caution - it is the old one, restored where it
+    //    now belongs.
+    //
+    //    1.75x keeps colour tracking a moderate lift and stops it tracking an
+    //    extreme one. Chroma at very low luma is mostly sensor noise anyway, and
+    //    amplifying noise is not saturation.
+    constexpr int kMaxCscale = 448;   // 1.75x in 8.8
+    int cscale = mean > 0 ? (lut[mean] * 256 / mean) : 256;
+    if (cscale > kMaxCscale) cscale = kMaxCscale;
+
+    // 🎨 ORDERED DITHER, because the panel is RGB565 and the curve now stretches
+    //    a narrow range a long way.
+    //
+    //    The frame arrives with its luma inside roughly 70 distinct values. The
+    //    curve spreads those across the full 0-255, so neighbouring input levels
+    //    land several output levels apart, and then 5/6/5 truncation rounds them
+    //    to the same handful of endpoints. The result is banding - flat plates of
+    //    colour with hard edges between them, on what should be a smooth face.
+    //
+    //    A 4x4 Bayer threshold spread over the quantisation step trades that for
+    //    a faint high-frequency texture the eye integrates into the shades that
+    //    are not representable. It costs one table lookup and an add per pixel,
+    //    and nothing at all in memory.
+    static const uint8_t kBayer[16] = {
+         0,  8,  2, 10,
+        12,  4, 14,  6,
+         3, 11,  1,  9,
+        15,  7, 13,  5,
+    };
+    const size_t groups_per_row = w / 2;
 
     uint16_t* out = reinterpret_cast<uint16_t*>(dst);
     for (size_t g = 0; g < groups; g++) {
@@ -543,11 +749,18 @@ static uint8_t* ToRgb565(const uint8_t* src, size_t src_len, int w, int h,
         const int dr = (((kRv * v) >> 16) * cscale) >> 8;
         const int dg = (-((kGu * u + kGv * v) >> 16) * cscale) >> 8;
         const int db = (((kBu * u) >> 16) * cscale) >> 8;
+        const size_t row = groups_per_row ? g / groups_per_row : 0;
+        const size_t col = groups_per_row ? g % groups_per_row : 0;
         for (int k = 0; k < 2; k++) {
             const int y = lut[p[k == 0 ? y0 : y1]];
-            const uint8_t r = Clamp(y + dr);
-            const uint8_t gg = Clamp(y + dg);
-            const uint8_t b = Clamp(y + db);
+            // Red and blue keep 5 bits (step 8), green keeps 6 (step 4), so the
+            // threshold is spread across a different distance for each.
+            const int bay = kBayer[((row & 3) << 2) | ((col * 2 + k) & 3)];
+            const int d5 = (bay >> 1) - 4;
+            const int d6 = (bay >> 2) - 2;
+            const uint8_t r = Clamp(y + dr + d5);
+            const uint8_t gg = Clamp(y + dg + d6);
+            const uint8_t b = Clamp(y + db + d5);
             out[g * 2 + k] = static_cast<uint16_t>(((r & 0xF8) << 8) | ((gg & 0xFC) << 3) | (b >> 3));
         }
     }
@@ -1528,6 +1741,15 @@ public:
                 //    needs a couple of frames to apply a new exposure, and
                 //    metering the frame that was in flight when we wrote the
                 //    register would just make the loop chase itself.
+                // 📷 FACE FRONT AND HOLD, before the sensor is touched. He is
+                //    looking at whoever asked - and, less obviously, the long
+                //    exposure a still uses is slow enough that an idle glance
+                //    part way through smears the frame. Released on every path
+                //    below, including the failures, or he would sit frozen.
+                head_.HoldStill(true);
+                head_.Center();
+                vTaskDelay(pdMS_TO_TICKS(400));   // let the servos arrive and stop
+
                 auto borrowed = gc0308::BeginStill(i2c_bus_);
                 bool got = false;
                 int metered = -1;
@@ -1542,9 +1764,21 @@ public:
                     // for the same reason: exposure collects more light, gain
                     // only amplifies what arrived, noise included. Gain is the
                     // last resort, not the first knob.
+                    // 🔴 GAIN IS NO LONGER DRIVEN, and that is a measurement, not
+                    //    a simplification. Sweeping 0x50 from 0x20 to 0xFF with
+                    //    exposure pinned at the frame length moved the mean
+                    //    between 33 and 50 with no ordering to it at all:
+                    //
+                    //        0x20:44  0x60:38  0x70:46  0x90:33  0xB0:48  0xFF:50
+                    //
+                    //    That is noise, not a gain curve - while four values in
+                    //    that range kill the frame outright. A lever that does not
+                    //    move the thing it is named after, and can break the
+                    //    picture, does not get to stay in the loop. The sensor
+                    //    keeps whatever gain its own AEC chose; the exposure below
+                    //    and the tone curve in ToRgb565 do the work.
                     for (int pass = 0; pass < 4; pass++) {
                         gc0308::SetExposure(i2c_bus_, exposure);
-                        gc0308::SetGain(i2c_bus_, gain);
                         // The sensor needs a frame or two to apply this. Metering
                         // the frame that was already in flight would make the
                         // loop chase its own tail.
@@ -1554,33 +1788,42 @@ public:
                         metered = yuv422::MeanLuma(camera_->frame_data(), camera_->frame_len(),
                                                    camera_->frame_format());
                         if (metered < 0) break;          // not YUV; nothing to meter on
+                        // 🔴 A DEAD FRAME LOOKS LIKE A PERFECT EXPOSURE. This
+                        //    sensor intermittently returns uniform mid-grey, which
+                        //    meters at exactly 128 - comfortably inside the
+                        //    acceptance window below, so the loop would stop and
+                        //    declare success on a picture of nothing. Caught by
+                        //    the gain sweep, which saw [128-128] twice. Check the
+                        //    range and spend another pass instead.
+                        {
+                            int lo = -1, hi = -1;
+                            yuv422::LumaRange(camera_->frame_data(), camera_->frame_len(),
+                                              camera_->frame_format(), &lo, &hi);
+                            if (lo >= 0 && (hi - lo) < 8) {
+                                ESP_LOGW(TAG, "flat frame (%d-%d) - retrying", lo, hi);
+                                continue;
+                            }
+                        }
                         if (metered >= 80 && metered <= 145) break;
                         if (metered <= 0) metered = 1;
 
                         if (metered < gc0308::kAimMean && exposure >= gc0308::kExpCeil) {
-                            // Out of exposure. Step the gain instead - measured,
-                            // not calculated, because its response is sublinear.
-                            if (gain >= gc0308::kGainMax) break;   // nothing left to give
-                            gain += gc0308::kGainStep;
-                            // Clamp HERE, not only inside SetGain. Letting the
-                            // loop variable run past the cap meant the reported
-                            // gain was 0x74 while the register only ever saw
-                            // 0x60 - a diagnostic that lies about what it did.
-                            if (gain > gc0308::kGainMax) gain = gc0308::kGainMax;
-                        } else {
-                            const int next = exposure * gc0308::kAimMean / metered;
-                            exposure = next > gc0308::kExpCeil ? gc0308::kExpCeil : next;
-                            if (metered > gc0308::kAimMean && gain > borrowed.gain) {
-                                gain -= gc0308::kGainStep;   // back the gain off first
-                            }
+                            // Exposure is spent and gain is not a lever here, so
+                            // there is nothing left to collect. The frame goes to
+                            // the tone curve as it is, which is the honest
+                            // outcome: a dim room photographed by a 0.3MP sensor.
+                            break;
                         }
+                        const int next = exposure * gc0308::kAimMean / metered;
+                        exposure = next > gc0308::kExpCeil ? gc0308::kExpCeil : next;
                     }
                 } else {
                     got = camera_->Capture();
                 }
                 // Unconditionally, before any early return below: the sensor
-                // goes back exactly as we found it.
+                // goes back exactly as we found it, and so does the head.
                 gc0308::EndStill(i2c_bus_, borrowed);
+                head_.HoldStill(false);
                 if (!got) {
                     return std::string("camera did not return a frame");
                 }
@@ -1640,6 +1883,7 @@ public:
             });
         ESP_LOGI(TAG, "registered local camera preview tool");
     }
+
 
     virtual AudioCodec* GetAudioCodec() override {
         static CoreS3AudioCodec audio_codec(i2c_bus_,
