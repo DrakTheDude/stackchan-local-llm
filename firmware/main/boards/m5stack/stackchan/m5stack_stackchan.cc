@@ -644,6 +644,26 @@ private:
         ESP_LOGI(TAG, "Init AW9523");
         aw9523_ = new Aw9523(i2c_bus_, 0x58);
         vTaskDelay(pdMS_TO_TICKS(50));
+
+        // 🔴 RESET THE AMPLIFIER HERE - EARLY, AND ON EVERY BOOT.
+        //
+        //    The AW88298 has its own supply and keeps its registers across a soft
+        //    reset: the ESP32 rebooting means nothing to it. So without this, the
+        //    first open of a boot inherits whatever the previous boot left
+        //    behind, and a fault that depends on inherited state alternates
+        //    between reboots - which is exactly how this was found ("every other
+        //    reboot works", then "every other ding sounds boosted").
+        //
+        // ⚠️ AND THE TIMING IS THE POINT, not just the reset. Doing this lazily
+        //    at the first EnableOutput - which is after I2S is already clocking -
+        //    left the chime audibly louder on every other boot while six
+        //    consecutive boots read back byte-identical REG61/REG0C. Resetting an
+        //    amplifier mid-stream leaves internal state its configuration
+        //    registers do not show. Here, nothing is clocking yet and the codec
+        //    object does not exist, so it is configured once from a known state.
+        //
+        //    Upstream's CoreS3 board defines ResetAw88298 and never calls it.
+        aw9523_->ResetAw88298();
     }
 
     void PollTouchpad() {

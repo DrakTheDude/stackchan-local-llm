@@ -26,9 +26,18 @@ private:
     // ONE attempt at getting the speaker genuinely open: open the device, prove
     // the amp answers, set the volume. Returns false having left it closed, and
     // having pulsed the amp's reset line if the open lied (see EnableOutput).
-    bool TryOpenSpeaker();
+    // `allow_reset` gates the amp's reset line, which is deliberately NOT the
+    // first move: pulsing reset while I2S is clocking changes the sound without
+    // changing any register you can read back. Retrying alone fixes the common
+    // case, so the chip is only disturbed once that has failed.
+    bool TryOpenSpeaker(bool allow_reset);
     // TryOpenSpeaker plus the bookkeeping: boost re-applied, output_enabled_ set.
-    bool BringUpSpeaker();
+    bool BringUpSpeaker(bool allow_reset = false);
+    // The same two, for the microphone. Same failure, same shape: the open can
+    // report success while the ES7210 is unreachable, and a mic that is not
+    // really open is a robot that shows "listening" and hears nothing.
+    bool TryOpenMic();
+    bool BringUpMic();
 
     virtual int Read(int16_t* dest, int samples) override;
     virtual int Write(const int16_t* data, int samples) override;
@@ -71,6 +80,9 @@ public:
     // EnableOutput.
     bool AmpResponds();
 
+    // The same question for the microphone codec.
+    bool MicResponds();
+
     // How the board resets the amplifier. The AW88298's reset line is on a
     // different chip (the AW9523 IO expander), which the codec does not own, so
     // the board hands in a closure. Optional: without it, recovery is limited to
@@ -88,13 +100,9 @@ private:
     // both is what lets Write() retry instead of discarding a reply nobody will
     // ever hear. See the note in Write().
     bool output_wanted_ = false;
+    bool input_wanted_ = false;
     int64_t last_open_retry_us_ = 0;
-
-    // The amp keeps its registers across a soft reset - it has its own supply and
-    // the ESP32 rebooting means nothing to it. So the first open of a boot starts
-    // from whatever the LAST boot left behind, which is how a fault can alternate
-    // between reboots. Reset it once per power-up and every boot starts level.
-    bool amp_reset_at_boot_ = false;
+    int64_t last_in_retry_us_ = 0;
     // 🔴 OFF BY DEFAULT, and it was briefly true. Turning the boost on was
     //    MEASURED to change nothing audible - REG61 read back as 0x6673, so the
     //    write landed and simply does not move this speaker - and the popping

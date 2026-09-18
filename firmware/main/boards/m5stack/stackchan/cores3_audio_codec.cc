@@ -190,47 +190,80 @@ void CoreS3AudioCodec::SetOutputVolume(int volume) {
     AudioCodec::SetOutputVolume(volume);
 }
 
+// 🔴 NOT ESP_ERROR_CHECK. These configure the ES7210 over the SHARED I2C bus,
+//    and that bus NACKs under load. Aborting here rebooted the whole robot
+//    mid-boot, from PlaySound on the activation-done event, once the boot got
+//    busy enough (a TLS client starting at the same time did it).
+//
+// 🔴 AND AN OPEN THAT RETURNS OK IS NOT PROOF THE MICROPHONE IS LISTENING -
+//    exactly as for the amplifier, one function down. `Adev_Codec: Input already
+//    open` in the log is the tell: the layer reports success without having
+//    written a single ES7210 register, so the chip keeps whatever configuration
+//    it had. The robot then shows "listening" on screen, the wake word never
+//    fires, and nothing anywhere says why. Observed on real hardware after the
+//    device had been idle.
+bool CoreS3AudioCodec::TryOpenMic() {
+    esp_codec_dev_sample_info_t fs = {
+        .bits_per_sample = 16,
+        .channel = 2,
+        .channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0),
+        .sample_rate = (uint32_t)output_sample_rate_,
+        .mclk_multiple = 0,
+    };
+    if (input_reference_) {
+        fs.channel_mask |= ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
+    }
+    esp_err_t err = esp_codec_dev_open(input_dev_, &fs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mic open failed (%s)", esp_err_to_name(err));
+        return false;
+    }
+    if (!MicResponds()) {
+        ESP_LOGW(TAG, "mic opened but the ES7210 does not answer - closing to retry");
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(input_dev_));
+        return false;
+    }
+    err = esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0),
+                                            input_gain_);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mic gain not set (%s) - input still usable", esp_err_to_name(err));
+    }
+    return true;
+}
+
+bool CoreS3AudioCodec::BringUpMic() {
+    if (!TryOpenMic()) {
+        return false;
+    }
+    AudioCodec::EnableInput(true);
+    return true;
+}
+
 void CoreS3AudioCodec::EnableInput(bool enable) {
+    input_wanted_ = enable;
     if (enable == input_enabled_) {
         return;
     }
-    if (enable) {
-        esp_codec_dev_sample_info_t fs = {
-            .bits_per_sample = 16,
-            .channel = 2,
-            .channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0),
-            .sample_rate = (uint32_t)output_sample_rate_,
-            .mclk_multiple = 0,
-        };
-        if (input_reference_) {
-            fs.channel_mask |= ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
+    if (!enable) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(input_dev_));
+        AudioCodec::EnableInput(false);
+        return;
+    }
+    // Same bounded retry as the speaker, for the same bus stall.
+    constexpr int kAttempts = 4;
+    for (int attempt = 0; attempt < kAttempts; attempt++) {
+        if (attempt > 0) {
+            vTaskDelay(pdMS_TO_TICKS(150));
         }
-        // 🔴 NOT ESP_ERROR_CHECK. These configure the ES7210 over the SHARED
-        //    I2C bus, and that bus NACKs occasionally under load - the LED ring
-        //    has been reporting it for days. Aborting here rebooted the whole
-        //    robot mid-boot, from PlaySound on the activation-done event, once
-        //    the boot got busy enough (a TLS client starting at the same time did it).
-        //
-        //    Note Read()/Write() below already use the WITHOUT_ABORT form: this
-        //    file always knew a codec error should not be fatal, and the enable
-        //    path simply never got the same treatment. Same lesson as
-        //    I2cDevice::ReadReg, one file over.
-        esp_err_t err = esp_codec_dev_open(input_dev_, &fs);
-        if (err != ESP_OK) {
-            // Leave input_enabled_ false so the next attempt retries instead of
-            // believing a microphone is open when it is not.
-            ESP_LOGE(TAG, "mic open failed (%s) - staying closed", esp_err_to_name(err));
+        if (BringUpMic()) {
+            if (attempt > 0) {
+                ESP_LOGI(TAG, "mic came up on attempt %d", attempt + 1);
+            }
             return;
         }
-        err = esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0),
-                                                input_gain_);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "mic gain not set (%s) - input still usable", esp_err_to_name(err));
-        }
-    } else {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(input_dev_));
     }
-    AudioCodec::EnableInput(enable);
+    ESP_LOGE(TAG, "ES7210 unreachable after %d attempts - mic left closed, "
+                  "retrying while the robot listens", kAttempts);
 }
 
 // 🔴 AN OPEN THAT RETURNS OK IS NOT PROOF THE AMPLIFIER IS LISTENING, and
@@ -254,7 +287,7 @@ void CoreS3AudioCodec::EnableInput(bool enable) {
 //
 //    So this asks the amp whether it is actually there, and reports failure
 //    honestly rather than leaving the caller believing it has a speaker.
-bool CoreS3AudioCodec::TryOpenSpeaker() {
+bool CoreS3AudioCodec::TryOpenSpeaker(bool allow_reset) {
     // Play 16bit 1 channel
     esp_codec_dev_sample_info_t fs = {
         .bits_per_sample = 16,
@@ -269,13 +302,20 @@ bool CoreS3AudioCodec::TryOpenSpeaker() {
         return false;
     }
     if (!AmpResponds()) {
-        // The open lied. Close it, pulse the amp's reset line, and let the
-        // caller try again - a fresh open re-runs aw88298_open, which is what
-        // actually configures the chip, and that has to happen while the bus is
-        // free or it achieves nothing.
-        ESP_LOGW(TAG, "speaker opened but the amp does not answer - resetting it");
+        // The open lied: its register writes went nowhere. Close, so the next
+        // attempt re-runs aw88298_open - that is what actually configures the
+        // chip, and it has to happen while the bus is free or it achieves
+        // nothing.
+        //
+        // ⚠️ THE RESET IS A LAST RESORT, NOT THE FIRST MOVE. Pulsing reset while
+        //    I2S is clocking leaves internal state the configuration registers do
+        //    not show: it was audible as a boot chime that came out louder on the
+        //    boots where this fired, while the registers read byte-identical. A
+        //    plain reopen fixes the common case - the bus was simply busy - so
+        //    the chip only gets disturbed once retrying alone has failed.
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
-        if (amp_reset_) {
+        if (allow_reset && amp_reset_) {
+            ESP_LOGW(TAG, "amp still not answering after retries - resetting it");
             amp_reset_();
         }
         return false;
@@ -293,20 +333,19 @@ bool CoreS3AudioCodec::TryOpenSpeaker() {
     return true;
 }
 
-bool CoreS3AudioCodec::BringUpSpeaker() {
-    // 🔴 ONCE PER POWER-UP, BEFORE THE FIRST OPEN. The amp has its own supply
-    //    and keeps its registers across a soft reset, so without this the first
-    //    open of a boot inherits whatever the previous boot left behind - and a
-    //    fault that depends on inherited state alternates between reboots, which
-    //    is exactly the symptom that led here ("every other reboot works").
-    //    Resetting unconditionally costs one I2C write and makes every boot
-    //    start from the same place.
-    if (!amp_reset_at_boot_ && amp_reset_) {
-        amp_reset_at_boot_ = true;
-        amp_reset_();
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    if (!TryOpenSpeaker()) {
+// ⚠️ THE ONCE-PER-BOOT RESET IS NOT HERE ANY MORE, and moving it was the fix for
+//    a second symptom. It used to fire lazily on the first EnableOutput - which
+//    is AFTER I2S is already clocking - and resetting an amplifier mid-stream
+//    leaves internal state that its configuration registers do not show. Six
+//    consecutive boots read back byte-identical REG61/REG0C while the boot chime
+//    was audibly louder on every other one.
+//
+//    The board now resets it during init, before this object exists and before
+//    anything is clocking, so the chip is configured once from a known state.
+//    See InitializeAw9523 in the board file. What remains here is RECOVERY: the
+//    reset in TryOpenSpeaker, for an amp that has gone unreachable at runtime.
+bool CoreS3AudioCodec::BringUpSpeaker(bool allow_reset) {
+    if (!TryOpenSpeaker(allow_reset)) {
         return false;
     }
     // AFTER the open, never before: esp_codec_dev_open re-runs aw88298_open,
@@ -339,7 +378,9 @@ void CoreS3AudioCodec::EnableOutput(bool enable) {
         if (attempt > 0) {
             vTaskDelay(pdMS_TO_TICKS(150));
         }
-        if (BringUpSpeaker()) {
+        // Plain retries first; the reset line only from the third attempt, once
+        // "the bus was simply busy" has been ruled out.
+        if (BringUpSpeaker(attempt >= 2)) {
             if (attempt > 0) {
                 ESP_LOGI(TAG, "speaker came up on attempt %d", attempt + 1);
             }
@@ -397,6 +438,23 @@ bool CoreS3AudioCodec::AmpResponds() {
     return false;
 }
 
+// The ES7210's chip-ID register. Any successful read proves the chip is on the
+// bus and answering; the ID value itself is not checked, because an unexpected
+// value would still mean it is talking, which is the question.
+bool CoreS3AudioCodec::MicResponds() {
+    if (in_ctrl_if_ == nullptr) {
+        return false;
+    }
+    for (int attempt = 0; attempt < 3; attempt++) {
+        uint8_t v = 0;
+        if (in_ctrl_if_->read_reg(in_ctrl_if_, 0xFD, 1, &v, 1) == 0) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return false;
+}
+
 std::string CoreS3AudioCodec::DescribeAmp() {
     if (out_ctrl_if_ == nullptr) return "amp unreachable";
     auto rd = [this](uint8_t reg) -> int {
@@ -414,8 +472,29 @@ std::string CoreS3AudioCodec::DescribeAmp() {
 }
 
 int CoreS3AudioCodec::Read(int16_t* dest, int samples) {
+    // 🔴 THIS USED TO RETURN `samples` WITHOUT TOUCHING THE BUFFER when input was
+    //    closed - it claimed it had filled it. The wake-word engine then fed on
+    //    whatever was already in that memory, for ever. From the room: the screen
+    //    says "listening", you talk to him, and nothing is ever picked up. No
+    //    error, no log line, no way to tell it apart from a broken microphone.
+    //
+    //    So: keep trying while something is listening, and when there is nothing
+    //    to give, hand over SILENCE rather than stale memory.
+    if (!input_enabled_ && input_wanted_) {
+        const int64_t now = esp_timer_get_time();
+        if (now - last_in_retry_us_ >= 250000) {
+            last_in_retry_us_ = now;
+            if (BringUpMic()) {
+                ESP_LOGW(TAG, "mic recovered - he can hear you again");
+            }
+        }
+    }
     if (input_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t)));
+        if (esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t)) != ESP_OK) {
+            memset(dest, 0, samples * sizeof(int16_t));
+        }
+    } else {
+        memset(dest, 0, samples * sizeof(int16_t));
     }
     return samples;
 }
