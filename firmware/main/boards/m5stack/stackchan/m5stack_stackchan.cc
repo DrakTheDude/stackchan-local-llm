@@ -663,7 +663,52 @@ private:
         //    object does not exist, so it is configured once from a known state.
         //
         //    Upstream's CoreS3 board defines ResetAw88298 and never calls it.
+        //
+        // 🔴 BUT WAIT FOR THE CHIP TO EXIST FIRST. A reset pulse aimed at a part
+        //    whose supply has not come up yet does nothing at all, silently.
+        //
+        //    That is the difference between the two ways this robot starts:
+        //
+        //      ordinary reboot     the amp's rail was never cut, so it is
+        //                          already up when this runs at ~200ms
+        //      wake from power-off the PMIC is bringing that rail up right now,
+        //                          and the amp answers some time later
+        //
+        //    Which is exactly the reported symptom - silent coming out of
+        //    hibernation, fine on the next reboot from there - and why it looked
+        //    intermittent rather than like the ordering bug it is. Probing costs
+        //    nothing on the common path, where the first probe succeeds.
+        const int waited = WaitForAmp();
+        if (waited < 0) {
+            ESP_LOGE(TAG, "amplifier never appeared on I2C - resetting it anyway");
+        } else if (waited > 0) {
+            ESP_LOGW(TAG, "amplifier took %d ms to appear - its supply was still "
+                          "coming up (waking from power-off?)", waited);
+        }
         aw9523_->ResetAw88298();
+    }
+
+    // Milliseconds waited for the AW88298 to acknowledge its address, 0 if it was
+    // already there, -1 if it never answered. A bare address probe, because the
+    // codec object does not exist yet at this point in the boot.
+    //
+    // ⚠️ THE >> 1 IS NOT OPTIONAL. esp_codec_dev takes 8-BIT addresses - which is
+    //    why the logs read "dev 6c" and "dev 80" - and i2c_master_probe takes
+    //    7-bit ones. Passing the constant straight through probes an address
+    //    nothing lives at, and reports a perfectly healthy amplifier missing on
+    //    every boot. It did exactly that, which is how this comment exists.
+    static constexpr uint8_t kAmpAddr7 = AUDIO_CODEC_AW88298_ADDR >> 1;
+
+    int WaitForAmp() {
+        constexpr int kTimeoutMs = 1500;
+        constexpr int kStepMs = 25;
+        for (int waited = 0; waited <= kTimeoutMs; waited += kStepMs) {
+            if (i2c_master_probe(i2c_bus_, kAmpAddr7, kStepMs) == ESP_OK) {
+                return waited;
+            }
+            vTaskDelay(pdMS_TO_TICKS(kStepMs));
+        }
+        return -1;
     }
 
     void PollTouchpad() {
