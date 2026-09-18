@@ -39,7 +39,12 @@ jobs:
         shell: bash
         run: |
           . "$IDF_PATH/export.sh" >/dev/null
-          deploy/build.sh
+          # `bash deploy/build.sh`, not `deploy/build.sh`. The executable bit is
+          # recorded in git and correct - but CI should not fail on a file
+          # permission, and a re-run of an older commit replays that commit's
+          # tree, so a mode fix cannot rescue a run that started before it.
+          # Humans still run it directly, which is why the bit matters too.
+          bash deploy/build.sh
 
       - name: Merge into one image for the browser flasher
         shell: bash
