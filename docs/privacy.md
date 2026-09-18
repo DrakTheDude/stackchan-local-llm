@@ -1,0 +1,150 @@
+# Checking the privacy claim yourself
+
+This project exists because an always-on microphone and a camera pointed at a room were talking to an
+endpoint nobody documents. Replacing that with a promise would not be an improvement. So here is the
+claim, stated narrowly enough to be wrong, and the checks that test it.
+
+> **The claim.** With the stack as shipped, the robot talks to exactly one address: the server you
+> configured. Your speech is transcribed, answered and spoken on machines you own. No audio, no
+> transcript, no photograph and no summary of your conversation leaves your network.
+
+Run the checks. Do not take the paragraph's word for it — that is the entire point.
+
+---
+
+## 1. Read every URL in the firmware
+
+The strongest check, and the easiest. The firmware is a file; every address it could dial is a string
+inside it.
+
+```bash
+strings -n 8 firmware/build/xiaozhi.bin | grep -oE 'https?://[^ "]+' | sort -u
+```
+
+On a build of this repo, that is the **entire** output:
+
+```
+http://YOUR_SERVER:8003/xiaozhi/ota/          <- the address you set. The only one dialled
+http://192.168.4.1                            <- the robot's OWN address while serving Wi-Fi setup
+http://www.w3.org/2000/svg                    <- an XML namespace, never fetched
+https://<...>.feishu.cn/wiki/<...>            <- printed in a LOG LINE pointing a developer at
+                                                 wake-word docs. Never fetched
+```
+
+Two of those are not network destinations at all, and one is the robot's own access point. If you see
+anything else — particularly a vendor's API — that is a finding, and worth an issue.
+
+> ⚠️ **Do this on a binary you built**, or on a release binary whose build you can reproduce. Checking
+> a file somebody handed you proves something about that file, which is not the same thing.
+
+Worth knowing what is *absent*: there is **no NTP server** in the image. The clock comes from your own
+server's reply, so the robot does not quietly reach a time service either.
+
+## 2. Confirm the cloud vision path is off
+
+The upstream firmware can send camera frames to a vision endpoint for captioning. That default is a
+cloud API, and it is the single worst leak available on this hardware — pictures of your room.
+
+```bash
+grep -n "GetCamera" firmware/main/boards/m5stack/stackchan/m5stack_stackchan.cc
+```
+
+It returns `nullptr`, deliberately. The common code reaches `GetCamera()` from exactly two places and
+both are that path: the stock `take_photo` tool, and the code that stores whatever vision URL the
+server offers. With `nullptr`, the tool is never registered and a vision URL is never even accepted.
+
+The camera still works — `self.camera.show_photo` captures and draws on the robot's own screen — it
+simply has nowhere off-device to send anything.
+
+## 3. Confirm the server's own plugins cannot call out
+
+The server ships built-in tools the model may call, and three of them leave your network: a weather
+API, a news service, a web search. In `server/config.example.yaml`:
+
+```yaml
+Intent:
+  function_call:
+    functions: []      # empty = none of them load
+```
+
+An empty list is a privacy control, not tidying. Leaving the key out is **not** the same as an empty
+list — the config merges over upstream's defaults, so an absent key means "use theirs".
+
+## 4. Confirm your conversations are summarised locally
+
+The memory feature summarises each conversation with an LLM. Upstream's default for that summariser is
+a **cloud** provider, and because the config merges, omitting the key silently uses it — every
+conversation posted to an API to be summarised.
+
+```yaml
+Memory:
+  mem_local_short:
+    llm: Ollama        # must name YOUR entry, and must match selected_module.LLM
+```
+
+## 5. Read the patch assertions
+
+The server image is built from upstream's with patches applied. Every replacement **asserts** that the
+text it is replacing is still there, so an upstream change fails the build rather than silently
+restoring the original behaviour:
+
+```bash
+grep -c "assert" server/patches/*.py
+```
+
+That is what stops the privacy-relevant patches from rotting quietly.
+
+## 6. Watch the wire
+
+The checks above read code. This one watches behaviour — point it at your robot's address for an
+evening:
+
+```bash
+sudo tcpdump -n "host YOUR_ROBOT_IP and not host YOUR_SERVER_IP"
+```
+
+Ideally: silence, apart from DHCP and ARP. Your router's client list will do the same job more
+crudely if you would rather not run tcpdump.
+
+---
+
+## The switches
+
+Two settings, on the robot, reached by holding the screen for five seconds:
+
+- **Microphone off** *closes the input device.* Not a flag that blanks the audio afterwards — the codec
+  stops streaming, and the wake word stops working too. A robot advertised as not listening should not
+  be listening for its own name. A **MIC OFF** badge shows on screen, and the setting survives a reboot:
+  it is restored before anything can open the microphone.
+- **Camera off** refuses at the point of capture and says so.
+
+Both persist deliberately. A mute that quietly lapses overnight is worse than no mute.
+
+---
+
+## What this does not protect you from
+
+A checklist that only lists reassurances is marketing. These are real and unfixed:
+
+- **Anyone holding the robot.** NVS is unencrypted, so your Wi-Fi credentials — and any token you add —
+  can be read off the flash by someone with the device and a cable. Same as the factory firmware.
+- **Your own LAN.** The robot talks to your server over plain HTTP and an unauthenticated WebSocket.
+  Anyone already on your network can watch the traffic. Encrypting it is a real task and not done.
+- **Your server's own model.** If you point the LLM at a hosted API instead of a local one, your
+  conversations go there. The stack defaults to local; the setting is yours to get wrong.
+- **MCP servers you add.** Tools you mount can do whatever they do. That is the point of them, and it
+  is your judgement.
+- **The backup you made.** The factory firmware backup contains your Wi-Fi password in plain text. Keep
+  it off cloud sync and out of any repository.
+- **Supply chain.** You are trusting ESP-IDF, the upstream firmware, the Docker images and this
+  project. The checks above test *behaviour*, not the good intentions of everyone upstream.
+
+## What still uses the internet, occasionally
+
+Setting up, not running:
+
+- pulling Docker images and downloading a model, once
+- your own `git clone`, and the ESP-IDF toolchain if you build the firmware
+
+Once it is running, nothing on the robot or in the stack needs the internet. You can unplug the WAN
+and talk to him, which is the most satisfying test on this page.

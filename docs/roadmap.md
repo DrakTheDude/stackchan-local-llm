@@ -150,9 +150,10 @@ Full English docs, and a path from a factory device to a local robot in about 30
 
 The reason the project exists, so it gets a page of its own rather than a promise.
 
-- ⬜ A checklist an owner can run themselves: scan the firmware for URLs, confirm the cloud vision path is
-  disabled, confirm the server's built-in plugin allowlist is empty, confirm memory summarisation is local,
-  read the patch assertions
+- ✅ **[A checklist an owner can run themselves](privacy.md)** — six checks, each with the command and the
+  expected output, plus what the project does **not** protect against. The firmware URL scan is run and its
+  real output published: one configured address, the robot's own setup AP, an XML namespace and a doc link
+  printed in a log message. No NTP server either, so the clock comes from your own server.
 - ⬜ What the factory firmware sends, and where, as far as can be established
 
 ## Upstream ⬜
