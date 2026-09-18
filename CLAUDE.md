@@ -60,7 +60,8 @@ drafts, comments, examples, and test fixtures:
 | `firmware/` | platform | the xiaozhi-esp32 fork (subtree). Our board goes in `firmware/main/boards/m5stack/stackchan/` |
 | `server/` | local AI stack | docker compose, patch scripts, English config |
 | `integrations/` | integration | *planned:* the status contract, reference status server, MCP examples |
-| `docs/` | reproducibility | roadmap now; quickstart, backup/restore, flashing, troubleshooting, variants, privacy checklist to come |
+| `docs/` | reproducibility | [roadmap](docs/roadmap.md), [quickstart](docs/quickstart.md), [privacy checklist](docs/privacy.md), [stock vs local](docs/stock-vs-local.md), [characters](docs/characters.md), [model floor](docs/model-floor.md), [releasing](docs/releasing.md). Backup/restore and board variants still to come |
+| `docs/flash/` | reproducibility | the browser flasher. Published by CI on a tag, from the binaries that tag built — never committed, so the page and the firmware cannot drift |
 
 ### Updating the upstream firmware base
 

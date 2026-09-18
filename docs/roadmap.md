@@ -16,8 +16,10 @@ lock-up, after a week of chasing intermittent audio faults that turned out to be
 around one undiagnosed I²C stall. Both release blockers are closed: each robot reads its own factory
 servo calibration, and the server address is set on the robot rather than compiled in.
 
-**What is left before this is easy for someone else** is packaging, not code: prebuilt binaries, a
-browser flasher, and honest numbers for which models are actually good enough.
+**Packaging is done too.** Tagged builds are produced by CI, asserted against the chip, the board, the
+OTA URL and the *contents* of the assets partition, and published with a
+[browser flasher](https://drakthedude.github.io/stackchan-local-llm/flash/) that writes each part at its own offset so a robot keeps its factory servo
+calibration. What is left is honest numbers for which models are actually good enough.
 
 ⚠️ **All of it is verified on exactly one robot.** Every hardware claim here — the I²C map, the servo
 rail, the camera's behaviour, the audio quirks — comes from a single unit. A report from a second one is
@@ -75,7 +77,8 @@ English-first board support, with every hardware assumption written down next to
   Wi-Fi or on a connect timeout — so changing servers meant breaking the Wi-Fi on purpose. A five-second
   hold on the screen now enters setup. The robot also says "no server set yet" instead of looping a
   connection error, and the setup network is `StackChan-XXXX` rather than upstream's `Xiaozhi-XXXX`.
-  **Prebuilt binaries and the browser flasher are no longer blocked on firmware — only on packaging.**
+  **Both shipped**: prebuilt binaries and the browser flasher are live, and this is what made one
+  binary serve everybody.
 - ⬜ Behaviour, documented: face and expressions, head motion and the thinking pose, LED ring states,
   camera (on-screen only), wake word ("Hi, Stack Chan" — runs on the robot, not the server)
 - ⬜ **Hardware assumptions, each with a way to verify it:** I²C device map, servo rail at `0x6F`, servo
@@ -161,13 +164,19 @@ Full English docs, and a path from a factory device to a local robot in about 30
   model download (a 32B is ~20 GB), assumes Docker is installed, defaults to a smaller model.
 - ⬜ 🔑 **Factory firmware backup as the first step**, verified, plus the restore path. Backups contain Wi-Fi
   credentials — say where *not* to keep them.
-- ⬜ Flashing on Windows / macOS / Linux. Investigate a **browser flasher** (ESP Web Tools on GitHub Pages)
-  so owners can flash from the Releases page without installing anything.
+- ✅ **Browser flasher** (ESP Web Tools, served from GitHub Pages) so owners can flash without
+  installing anything. Serves the binaries from the *Pages artefact*, not from the release: release
+  assets carry no `Access-Control-Allow-Origin`, so a browser cannot fetch them however correct the
+  URLs are. Writes each part at its own offset rather than a merged image, because a merged image pads
+  over NVS and destroys the per-unit servo calibration.
 - ⬜ Building from source: ESP-IDF version, the `SDKCONFIG_DEFAULTS` requirement, pre-flash checks
 - ⬜ Hardware bring-up guide
 - ⬜ Troubleshooting: symptom → cause → fix, generalised from the reference project
 - ⬜ Known board variants, maintained from reports
-- ⬜ Automated firmware builds and versioned releases (app + assets)
+- ✅ **Automated firmware builds and versioned releases** (app + assets), with the release blocked
+  unless the artefact is right: chip and board first, then the OTA URL, then the assets partition
+  inspected for the wake-word model and the face. Three releases shipped for the wrong chip before
+  those existed, and the check that would have caught all three is a blunt size floor.
 - ⬜ License (MIT) with upstream notices preserved; "by Drax and Claude, built with Claude Code"
 
 ## Privacy you can verify ⬜
@@ -194,10 +203,13 @@ The reason the project exists, so it gets a page of its own rather than a promis
   happens to retry the open at the right moment (fixed here already)
 - ⬜ Possibly: English logging / i18n for the server
 
-## Release ⬜
+## Release 🟡
 
-- ⬜ Private GitHub repo while the port is in progress
-- ⬜ Public once the quickstart works end to end on a factory unit
+- ✅ Private GitHub repo while the port was in progress
+- ✅ Public, with the quickstart run end to end on a factory unit
+- ✅ **Tagged releases with a browser flasher**, built and asserted by CI. How to cut one, and what
+  each assertion is there to stop, is in [releasing.md](releasing.md)
+- ⬜ Flashed and used by somebody who did not build it. Verified on one robot, by one person
 
 ---
 
@@ -219,5 +231,6 @@ release. Upstream PRs whenever a piece is solid.
 - **Other upstream boards.** `firmware/main/boards` is ~3.5 MB of boards that aren't StackChan. Pruning
   shrinks the fork but makes every upstream merge conflict-prone. Keep for now.
 - **Upstream base.** `66bf9f7` is six weeks behind upstream. Bump before release, or after the port works?
-- **Browser flasher.** Can ESP Web Tools take the factory backup first? If not, the quickstart needs a
-  second tool for that step.
+- ✅ **Browser flasher: no, ESP Web Tools cannot take the factory backup.** It writes; it does not
+  read. So the backup stays a separate step with M5Burner or `esptool`, and both the quickstart and the
+  flasher page say so before the first button — it is the only step in the whole process with no undo.

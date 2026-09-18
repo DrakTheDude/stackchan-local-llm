@@ -90,16 +90,38 @@ looking. **Check these before re-reading your config.**
 
 ## 2. Put the firmware on the robot
 
-> ⚠️ **Today this means building it yourself**, because there are no published release binaries yet.
-> The *address* no longer has to be compiled in — see below — so prebuilt binaries and a browser-based
-> flasher are now packaging work rather than firmware work. See [the roadmap](roadmap.md).
+**You do not have to compile your server's address in**, and you do not have to build anything. The
+robot is told where its server is *after* it is flashed, from its own setup page, so one binary works
+for everybody.
 
-**You do not have to compile your server's address in.** The robot can be told where its server is
-after it is flashed, from its own setup page — so the same binary works for anybody. Building it
-yourself is currently required only because there are no published release binaries yet.
+### The short way: flash it from your browser
 
-Install [ESP-IDF v6.0.2](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/),
-then:
+**[→ The flasher](https://drakthedude.github.io/stackchan-local-llm/flash/)** — Chrome or Edge on a desktop, a USB-C cable that carries *data*, about
+two minutes. It writes the same binaries this repository builds, each at its own flash offset. Safari
+and Firefox do not implement Web Serial, and it does not work from a phone.
+
+Four things about that page, in the order they catch people:
+
+1. **Back it up first (§0).** The flasher cannot do that for you, and M5Stack do not publish the
+   factory image. This is the one step with no undo.
+2. **Choose `USB JTAG/serial debug unit`**, not `USB VCOM`. VCOM is first in the list and looks like the
+   obvious answer; picking it returns you to the page with **no error message at all**, which reads like
+   a broken robot rather than a wrong menu entry.
+3. **Decline the erase** when it offers. Erasing wipes NVS — your Wi-Fi, your server address, and your
+   robot's **factory servo calibration**, which is unique to your unit and cannot be recovered. Declining
+   keeps all three and still replaces the firmware.
+4. **Close the tab afterwards.** The browser holds the serial port for as long as that page is open, so
+   anything else you point at the robot — a serial monitor, `esptool`, the flasher in a second tab —
+   fails with *access denied* or *port busy*. That reads like a driver fault. It is the tab.
+
+A robot that kept its Wi-Fi reconnects on its own and never offers the setup network, so skip to the
+five-second hold in §3 to give it your server address.
+
+### Or build it from source
+
+Worth it if you are changing the firmware, and required if you want a binary with your own address
+already in it. Install
+[ESP-IDF v6.0.2](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/), then:
 
 ```bash
 cd firmware
@@ -134,8 +156,14 @@ which is unique to it and cannot be recovered — survive a reflash.
 
 ## 3. First run
 
-1. Power the robot on. With no Wi-Fi saved it serves its own setup network, **`StackChan-XXXX`**.
-   Join it from a phone and the setup page opens by itself.
+1. Power the robot on.
+
+   - **A robot with no Wi-Fi saved** serves its own setup network, **`StackChan-XXXX`**. Join it from a
+     phone and the setup page opens by itself.
+   - **A robot that kept its Wi-Fi** — anything you declined the erase on — reconnects to the network
+     it already knows and never offers that setup network. Hold a finger on his screen for **five
+     seconds** to reach the same page. Waiting for a network that is not coming is the most common way
+     to conclude a good flash failed.
 2. On **Wi-Fi Config**, give it your 2.4 GHz network.
 3. On **Advanced**, put your server in **Custom OTA URL**:
 
@@ -172,7 +200,10 @@ Tapping the screen also starts a conversation.
 |---|---|
 | Robot never connects; server looks fine | The firewall layer, not your config. On Windows/WSL see §1. Check `HOST_LAN_IP` matches `server.websocket` in the config |
 | Worked for weeks, now silent | This machine's IP changed. Set a DHCP reservation, then hold his screen 5 s and update **Custom OTA URL** — no reflash needed |
-| "No server set yet" on screen | Exactly what it says: hold the screen 5 s, then Advanced → Custom OTA URL |
+| "No server set yet" on screen, or **`NO LLM`** in the corner | Exactly what they say: hold the screen 5 s, then Advanced → Custom OTA URL. The badge stays up until an address is set, because the startup message scrolls away and he only retries when woken |
+| The flasher's port list has two entries and neither works | Pick **USB JTAG/serial debug unit**. `USB VCOM` fails by closing the dialog with no error |
+| *Access denied* / *port busy* on the serial port | The flasher tab is still open and holding it. Close the tab |
+| Flashed fine, but no `StackChan-XXXX` network appears | You declined the erase, so he still has your Wi-Fi and went straight to it. Hold the screen 5 s instead |
 | He hears you, answers on screen, no sound | Should be fixed — the amplifier can open while unreachable. If it persists, the serial log says `amp unreachable after 4 attempts` |
 | Screen says "listening", nothing is picked up | Same class of bug on the microphone, also fixed. Look for `ES7210 unreachable` in the log |
 | He talks over you | `min_silence_duration_ms` in the config. 900 ms lets you pause mid-sentence; upstream's 200 ms does not |

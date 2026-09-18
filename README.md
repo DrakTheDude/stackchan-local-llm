@@ -9,8 +9,9 @@ camera — with nothing sent to a cloud service.
 By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 
 > **Working, on real hardware, daily.** Voice, face, head, LED ring, camera, wake word, an on-screen
-> settings menu and the privacy switches are all in use on the reference robot. You build the firmware
-> yourself today — prebuilt binaries and a browser flasher are the next job.
+> settings menu and the privacy switches are all in use on the reference robot.
+> **[Flash it from your browser](https://drakthedude.github.io/stackchan-local-llm/flash/)** — no toolchain, nothing to install — or build it
+> yourself from this tree.
 >
 > Verified on **one** StackChan. If you have one, reports from a second are the most useful thing you
 > could contribute. See [docs/roadmap.md](docs/roadmap.md).
@@ -29,7 +30,8 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 
 | | |
 |---|---|
-| **[Quickstart](docs/quickstart.md)** | factory robot → local robot. Back up first; that step is not optional |
+| **[Flash it from your browser](https://drakthedude.github.io/stackchan-local-llm/flash/)** | Chrome or Edge, a USB-C data cable, about two minutes. **Back up the factory firmware first** — the flasher cannot do that for you |
+| **[Quickstart](docs/quickstart.md)** | factory robot → local robot, the whole path including the server. Back up first; that step is not optional |
 | **[What you gain and lose](docs/stock-vs-local.md)** | honestly, against the firmware it shipped with. He will not dance any more |
 | **[Check the privacy claim](docs/privacy.md)** | six checks you can run yourself, and what this does *not* protect you from |
 | **[Roadmap](docs/roadmap.md)** | what is done, what is next, and what is still verified on only one robot |
