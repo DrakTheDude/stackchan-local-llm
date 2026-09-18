@@ -76,6 +76,35 @@ diagnose from across the room.
 up looking caffeinated and sounding like a night watchman. Whatever is built needs a way to see which
 character each half thinks it is wearing — the About page is the natural place.
 
+## 🔑 Switching one must NOT need a flash
+
+Worth deciding early, because the wrong answer shapes everything downstream.
+
+The built-in characters ship **together, in one binary**, and you pick one in the settings menu. The
+robot's half of a character is numbers and short strings — eye geometry, glance intervals, a few
+colours — so several of them cost a few hundred bytes. The choice lives in NVS next to the microphone
+mute.
+
+The alternative — a build per character, chosen at flash time — is tempting because it is less work,
+and it is wrong:
+
+- You would reflash to change your robot's mood, which nobody will do twice.
+- The **web flasher** would need one image per character, multiplied by every character ever added.
+  It should offer one button, not a menu of near-identical binaries.
+- Releases would multiply the same way.
+
+So flashing is for *adding* characters, exactly like any other firmware change. Choosing between the
+ones you have is a settings row.
+
+⚠️ That settles the robot's half only. The server's half — voice and persona — is config on another
+machine, so the first version will be "pick the look and motion on the robot, edit the voice and
+persona in the config". One switch for both is the ownership question above, and it is the thing that
+makes this feel finished rather than clever.
+
+Custom characters, written by owners rather than shipped with the firmware, are a later question
+again: they need a data path (the assets partition, or handed over by the server on connect) and none
+of that should be designed until the built-in ones work.
+
 ## Before any of this, one prerequisite
 
 **Tokenise what is already there.** The look and motion values are constants spread across four
