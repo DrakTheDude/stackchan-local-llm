@@ -1263,37 +1263,52 @@ public:
     void BootSelfCheck() {
         auto* codec = static_cast<CoreS3AudioCodec*>(GetAudioCodec());
 
-        // Poll rather than sleep a fixed time: the stall is a few hundred
-        // milliseconds on a good boot and has run past a second on a bad one,
-        // and a fixed delay would either be too short or waste the difference.
-        constexpr int kTimeoutMs = 8000;
-        constexpr int kStepMs = 200;
+        // 🔴 ONE GOOD PROBE PROVES NOTHING, and the first version of this check
+        //    shipped that mistake. During the stall the bus fails in bursts, so a
+        //    single round can land in a gap between two failures - and it did,
+        //    verbatim, on a reboot out of the screensaver:
+        //
+        //      W mic opened but the ES7210 does not answer - closing to retry
+        //      I boot self-check PASSED - speaker, mic and servo rail all up
+        //      E speaker open failed
+        //
+        //    A chime that says "all good" while the amplifier is failing is worse
+        //    than no chime: it is the one piece of feedback the owner has, and it
+        //    was lying. So the bus has to be QUIET FOR A WHILE, not quiet once.
+        constexpr int kTimeoutMs = 10000;
+        constexpr int kStepMs = 100;
+        constexpr int kCleanRoundsNeeded = 5;   // ~500ms of uninterrupted quiet
+        int clean = 0;
         bool amp = false, mic = false;
-        for (int waited = 0; waited < kTimeoutMs; waited += kStepMs) {
+        int waited = 0;
+        for (; waited < kTimeoutMs; waited += kStepMs) {
             amp = codec->AmpResponds();
             mic = codec->MicResponds();
-            if (amp && mic) {
-                if (waited > 0) {
-                    ESP_LOGI(TAG, "audio chips answered after %d ms", waited);
-                }
+            // The microphone is the one flag worth waiting on: the app opens the
+            // input early, so it becomes true on its own. The speaker cannot be
+            // used the same way - the chime is what opens it - so the amp is
+            // judged by whether it answers.
+            const bool listening = codec->input_enabled();
+            clean = (amp && mic && listening) ? clean + 1 : 0;
+            if (clean >= kCleanRoundsNeeded) {
                 break;
             }
             vTaskDelay(pdMS_TO_TICKS(kStepMs));
         }
+        if (clean >= kCleanRoundsNeeded) {
+            ESP_LOGI(TAG, "audio path steady after %d ms", waited);
+        }
 
-        // Settle. Both chips answering means the bus is free again; giving the
-        // codec's own open a clear run costs a quarter of a second once.
-        vTaskDelay(pdMS_TO_TICKS(250));
-
+        const bool steady = clean >= kCleanRoundsNeeded;
         const bool rail = EnsureServoRail();
-        const bool ok = amp && mic && rail;
+        const bool ok = steady && rail;
 
         if (ok) {
             ESP_LOGI(TAG, "boot self-check PASSED - speaker, mic and servo rail all up");
         } else {
-            ESP_LOGE(TAG, "boot self-check FAILED - amp:%s mic:%s servo rail:%s",
+            ESP_LOGE(TAG, "boot self-check FAILED - amp:%s mic:%s listening:%s servo rail:%s",
                      amp ? "ok" : "NO ANSWER", mic ? "ok" : "NO ANSWER",
-                     rail ? "ok" : "OFF");
+                     codec->input_enabled() ? "yes" : "NO", rail ? "ok" : "OFF");
         }
         // The exclamation is deliberately a different sound rather than silence.
         // Silence is what a flat battery and a broken amplifier both sound like.
