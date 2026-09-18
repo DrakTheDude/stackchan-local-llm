@@ -25,6 +25,8 @@
 
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 class StackySettings {
 public:
@@ -37,8 +39,11 @@ public:
         std::function<int()> get_volume;
         std::function<void(int)> set_brightness;  // 0..100
         std::function<int()> get_brightness;
-        // One line each for the About page: firmware, address, server.
-        std::function<std::string()> about_text;
+        // The About page, as label/value pairs rather than formatted lines. The
+        // page needs to style the two halves differently and wrap the value
+        // inside its own column - neither of which is possible once it has been
+        // flattened into one string.
+        std::function<std::vector<std::pair<std::string, std::string>>()> about_rows;
     };
 
     // Builds the overlay hidden. Call once, with the LVGL lock held, after the
@@ -53,6 +58,9 @@ public:
 private:
     void BuildList();
     void BuildAbout();
+    // Repopulates the About rows. Called on every open, because the address can
+    // change under a robot that has been running for a week.
+    void FillAbout();
     lv_obj_t* AddRow(const char* text, lv_event_cb_t cb);
     lv_obj_t* AddSlider(const char* text, int value, lv_event_cb_t cb, lv_obj_t** out_value_label);
 
@@ -61,8 +69,8 @@ private:
 
     lv_obj_t* root_ = nullptr;     // full-screen container, hidden by default
     lv_obj_t* list_ = nullptr;     // the scrolling rows
-    lv_obj_t* about_ = nullptr;    // the About page, shown in place of the list
-    lv_obj_t* about_label_ = nullptr;
+    lv_obj_t* about_ = nullptr;      // the About page, shown in place of the list
+    lv_obj_t* about_rows_ = nullptr;  // repopulated each time it is opened
     lv_obj_t* volume_value_ = nullptr;
     lv_obj_t* bright_value_ = nullptr;
     lv_obj_t* toast_ = nullptr;    // transient feedback, e.g. the self-check result

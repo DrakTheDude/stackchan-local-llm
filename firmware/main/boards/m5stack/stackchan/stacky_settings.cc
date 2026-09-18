@@ -202,9 +202,7 @@ void StackySettings::BuildList() {
 
     AddRow("About", [](lv_event_t* e) {
         auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
-        if (self->actions_.about_text && self->about_label_) {
-            lv_label_set_text(self->about_label_, self->actions_.about_text().c_str());
-        }
+        self->FillAbout();
         lv_obj_add_flag(self->list_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(self->about_, LV_OBJ_FLAG_HIDDEN);
     });
@@ -222,13 +220,19 @@ void StackySettings::BuildAbout() {
     lv_obj_set_style_pad_all(about_, kPad, 0);
     lv_obj_set_style_pad_row(about_, kPad, 0);
     lv_obj_set_flex_flow(about_, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_bg_opa(about_, LV_OPA_TRANSP, 0);
+    // Opaque, not transparent. The page it replaces is only hidden, and an
+    // overlay you can see through is how a stale row ends up ghosting behind
+    // the one you are reading.
+    lv_obj_set_style_bg_color(about_, c_bg_, 0);
+    lv_obj_set_style_bg_opa(about_, LV_OPA_COVER, 0);
 
-    about_label_ = lv_label_create(about_);
-    lv_label_set_long_mode(about_label_, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(about_label_, LV_PCT(100));
-    lv_obj_set_style_text_color(about_label_, c_text_, 0);
-    lv_label_set_text(about_label_, "");
+    about_rows_ = lv_obj_create(about_);
+    lv_obj_remove_style_all(about_rows_);
+    lv_obj_set_width(about_rows_, LV_PCT(100));
+    lv_obj_set_flex_grow(about_rows_, 1);
+    lv_obj_set_flex_flow(about_rows_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(about_rows_, 6, 0);
+    lv_obj_set_scroll_dir(about_rows_, LV_DIR_VER);
 
     lv_obj_t* back = lv_button_create(about_);
     lv_obj_set_size(back, LV_PCT(100), kRowHeight);
@@ -244,6 +248,46 @@ void StackySettings::BuildAbout() {
         lv_obj_add_flag(self->about_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(self->list_, LV_OBJ_FLAG_HIDDEN);
     }, LV_EVENT_CLICKED, this);
+}
+
+// 🅰️ NO BOLD FONT SHIPS WITH THIS FIRMWARE - Noto Sans basic at 14/16/20/30 and
+//    nothing else - and adding a bold face costs flash for the sake of one
+//    screen. Colour does the same job: the label in the saturated accent, the
+//    value in the softer text colour. The eye reads saturation as weight.
+//
+//    Two columns rather than one wrapped line, because a value that wraps across
+//    the whole screen loses its label. A long URL now wraps inside its own
+//    column with the label still beside it.
+void StackySettings::FillAbout() {
+    if (about_rows_ == nullptr) return;
+    lv_obj_clean(about_rows_);   // rebuilt on every open: the IP can change
+    if (!actions_.about_rows) return;
+
+    for (const auto& [label, value] : actions_.about_rows()) {
+        lv_obj_t* row = lv_obj_create(about_rows_);
+        lv_obj_remove_style_all(row);
+        lv_obj_set_width(row, LV_PCT(100));
+        lv_obj_set_height(row, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t* l = lv_label_create(row);
+        lv_label_set_text(l, label.c_str());
+        lv_obj_set_style_text_color(l, c_accent_, 0);
+        // ⚠️ WIDE ENOUGH FOR THE LONGEST LABEL, and CLIP rather than wrap. At 86px
+        //    "Firmware" broke across two lines as "Firmwar" / "e", which cost a
+        //    whole row of vertical space and pushed the last field off the
+        //    screen. A label that does not fit should be cut, never reflowed -
+        //    reflowing is how one narrow column eats the page.
+        lv_obj_set_width(l, 104);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
+
+        lv_obj_t* v = lv_label_create(row);
+        lv_label_set_text(v, value.c_str());
+        lv_obj_set_style_text_color(v, c_text_, 0);
+        lv_label_set_long_mode(v, LV_LABEL_LONG_WRAP);
+        lv_obj_set_flex_grow(v, 1);
+    }
 }
 
 void StackySettings::Show() {

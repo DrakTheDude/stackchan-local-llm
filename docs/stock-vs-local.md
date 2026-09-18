@@ -71,6 +71,26 @@ the microphone audio went.
 
 ---
 
+## Why it feels different, not just different
+
+The stock firmware is a **launcher**. The voice assistant is one icon among several, alongside a
+dance routine and a data service, and its settings pages change colour as you move between them. It
+reads as a small collection of programs that happen to share a robot.
+
+This is **one application**. There is no app list, nothing to launch, and the same palette is used
+everywhere — the face, the status ring, the idle screen and the settings menu all read their colours
+from one registered theme.
+
+That is a design choice rather than a shortcut, and it buys two things:
+
+- **The robot has a personality instead of a home screen.** Everything on the device is either him
+  talking to you or a setting about him talking to you. There is no level above that to return to.
+- **It can be skinned.** A single palette applied everywhere can be swapped for another one and the
+  whole device changes together, including the menu you would use to choose it. A UI that picks a
+  different colour per page has no identity to replace.
+
+---
+
 ## The honest trade
 
 The stock firmware is a finished consumer product with a catalogue behind it. This is a robot that

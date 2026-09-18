@@ -1080,17 +1080,34 @@ private:
         a.set_brightness = [this](int v) {
             GetBacklight()->SetBrightness((uint8_t)v, true);
         };
-        a.about_text = [this]() {
+        a.about_rows = [this]() {
             // The server address as the firmware ACTUALLY resolves it - NVS
             // first, compiled value as the fallback - rather than as configured.
             // "Which server is he really using" is the question this answers.
             Settings settings("wifi", false);
             std::string server = settings.GetString("ota_url");
             if (server.empty()) server = CONFIG_OTA_URL;
-
-            std::string out;
-            out += "Firmware  ";
-            out += esp_app_get_description()->version;
+            // Trimmed to what somebody standing in front of the robot is
+            // actually checking: which machine, on which port.
+            //
+            // The scheme carries no information here, and the path is the same
+            // on every install - but only ALMOST always, so a non-standard path
+            // is still shown rather than hidden. Between them they were two
+            // wrapped lines of nothing, which is what pushed the last field off
+            // a 240px screen.
+            for (const char* scheme : {"http://", "https://"}) {
+                const size_t n = strlen(scheme);
+                if (server.compare(0, n, scheme) == 0) {
+                    server.erase(0, n);
+                    break;
+                }
+            }
+            const std::string kUsualPath = "/xiaozhi/ota/";
+            if (server.size() > kUsualPath.size() &&
+                server.compare(server.size() - kUsualPath.size(), kUsualPath.size(),
+                               kUsualPath) == 0) {
+                server.erase(server.size() - kUsualPath.size());
+            }
             // Asked of esp_netif rather than of the Wi-Fi component: this is the
             // address the router actually handed out, and it does not depend on
             // whatever that component's API happens to look like.
@@ -1101,13 +1118,13 @@ private:
                 info.ip.addr != 0) {
                 snprintf(ip, sizeof(ip), IPSTR, IP2STR(&info.ip));
             }
-            out += "\nAddress   ";
-            out += ip;
-            out += "\nServer    " + server;
-            out += "\nServos    ";
-            out += ScsServo::calibration_is_fallback() ? "FALLBACK calibration"
-                                                       : "factory calibration";
-            return out;
+            return std::vector<std::pair<std::string, std::string>>{
+                {"Firmware", esp_app_get_description()->version},
+                {"Address", ip},
+                {"Server", server},
+                {"Servos", ScsServo::calibration_is_fallback() ? "FALLBACK calibration"
+                                                               : "factory calibration"},
+            };
         };
         return a;
     }
