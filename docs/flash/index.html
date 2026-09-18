@@ -43,10 +43,22 @@
   password in plain text.</strong></p>
 </div>
 
+<div class="panel warn">
+  <p><strong>⚠️ When it asks whether to erase the device, say no.</strong></p>
+  <p>Your robot's servos were centred at the factory and those numbers live in a small settings area
+  of its flash. They are unique to your unit, are in no datasheet, and <strong>cannot be recovered
+  once erased</strong> — this firmware reads them at every boot so his head sits straight and his tilt
+  limits stay clear of the mechanical stop.</p>
+  <p>Erasing also removes your Wi-Fi details and server address, which are merely annoying by
+  comparison. Installing without erasing writes only what it needs and leaves that area alone.</p>
+</div>
+
 <h2>Then</h2>
 <ol>
   <li>Plug the robot into this computer with a USB-C cable that carries <em>data</em>.</li>
-  <li>Press the button below and pick the serial port that appears.</li>
+  <li>Press the button below and pick the serial port that appears — on Windows it is usually
+      <em>USB VCOM</em> rather than the JTAG entry.</li>
+  <li><strong>Decline the erase</strong> when asked, as above.</li>
   <li>When it finishes, the robot restarts and serves a Wi-Fi network called
       <code>StackChan-XXXX</code>. Join it from a phone, give it your network, and put your server's
       address under <strong>Advanced → Custom OTA URL</strong>.</li>
