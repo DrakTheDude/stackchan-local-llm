@@ -133,14 +133,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p site
-          cp docs/flash/index.html docs/flash/manifest.json site/
+          # ⚠️ INTO site/flash/, NOT site/. The artifact becomes the whole site,
+          #    so anything at its root is served at "/" - and the flasher already
+          #    lives at /flash/, which is the URL in the README, in the release
+          #    notes and in anything anyone has bookmarked. Keeping the path is
+          #    not tidiness; moving it silently breaks every link to it.
+          mkdir -p site/flash
+          cp docs/flash/index.html docs/flash/manifest.json site/flash/
           # Everything the manifest names, and nothing else. The merged image is
           # deliberately NOT here: it erases NVS, and it has no business being
           # one click away.
           cp out/bootloader.bin out/partition-table.bin out/ota_data_initial.bin \
-             out/xiaozhi.bin out/generated_assets.bin site/
-          ls -la site
+             out/xiaozhi.bin out/generated_assets.bin site/flash/
+
+          # Something at the root, so "/" is not a 404 that looks like a broken
+          # deployment. Also the honest place to say what this site is for.
+          cat > site/index.html <<'HTML'
+          <!doctype html><meta charset="utf-8">
+          <title>StackChan local LLM</title>
+          <meta http-equiv="refresh" content="0; url=flash/">
+          <body style="background:#000;color:#C9A9FF;font:16px system-ui;padding:40px">
+          <p>This site hosts the browser flasher for
+          <a style="color:#A17EFF" href="https://github.com/DrakTheDude/stackchan-local-llm">stackchan-local-llm</a>.</p>
+          <p><a style="color:#A17EFF" href="flash/">Go to the flasher</a></p>
+          </body>
+          HTML
+
+          find site -type f | sed 's|^|  |'
 
       - uses: actions/upload-pages-artifact@v3
         if: startsWith(github.ref, 'refs/tags/v')
