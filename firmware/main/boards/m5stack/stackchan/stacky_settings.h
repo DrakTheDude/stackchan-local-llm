@@ -39,6 +39,13 @@ public:
         std::function<int()> get_volume;
         std::function<void(int)> set_brightness;  // 0..100
         std::function<int()> get_brightness;
+        // 🔇 The privacy switches. Both persist across a reboot, which is the
+        //    honest behaviour: a microphone you turned off should still be off
+        //    in the morning.
+        std::function<void(bool)> set_mic_muted;
+        std::function<bool()> get_mic_muted;
+        std::function<void(bool)> set_camera_off;
+        std::function<bool()> get_camera_off;
         // The About page, as label/value pairs rather than formatted lines. The
         // page needs to style the two halves differently and wrap the value
         // inside its own column - neither of which is possible once it has been
@@ -63,6 +70,7 @@ private:
     void FillAbout();
     lv_obj_t* AddRow(const char* text, lv_event_cb_t cb);
     lv_obj_t* AddSlider(const char* text, int value, lv_event_cb_t cb, lv_obj_t** out_value_label);
+    lv_obj_t* AddToggle(const char* text, bool on, lv_event_cb_t cb, lv_obj_t** out_switch);
 
     Actions actions_{};
     bool visible_ = false;
@@ -73,6 +81,8 @@ private:
     lv_obj_t* about_rows_ = nullptr;  // repopulated each time it is opened
     lv_obj_t* volume_value_ = nullptr;
     lv_obj_t* bright_value_ = nullptr;
+    lv_obj_t* mic_switch_ = nullptr;
+    lv_obj_t* cam_switch_ = nullptr;
     lv_obj_t* toast_ = nullptr;    // transient feedback, e.g. the self-check result
 
     // Theme colours, read once at Build() so a restyle is one place to change.

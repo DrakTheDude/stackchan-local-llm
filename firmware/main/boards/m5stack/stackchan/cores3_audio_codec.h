@@ -83,6 +83,19 @@ public:
     // The same question for the microphone codec.
     bool MicResponds();
 
+    // 🔇 A REAL MUTE, not a flag that silences the buffer on the way out.
+    //
+    //    This CLOSES the input device, so the ES7210 stops streaming and there
+    //    is no path from the microphone to anywhere - the wake word included.
+    //    That is the point: a robot advertised as not listening should not be
+    //    listening for its own name either, and "we discard it afterwards" is
+    //    not a claim anybody can check from the outside.
+    //
+    //    While muted, EnableInput(true) is remembered but not obeyed, and Read()
+    //    hands back silence. Unmuting re-opens if something still wants input.
+    void SetMicMuted(bool muted);
+    bool mic_muted() const { return mic_muted_; }
+
     // How the board resets the amplifier. The AW88298's reset line is on a
     // different chip (the AW9523 IO expander), which the codec does not own, so
     // the board hands in a closure. Optional: without it, recovery is limited to
@@ -101,6 +114,7 @@ private:
     // ever hear. See the note in Write().
     bool output_wanted_ = false;
     bool input_wanted_ = false;
+    bool mic_muted_ = false;
     int64_t last_open_retry_us_ = 0;
     int64_t last_in_retry_us_ = 0;
     // 🔴 OFF BY DEFAULT, and it was briefly true. Turning the boost on was

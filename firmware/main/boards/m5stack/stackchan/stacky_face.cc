@@ -589,6 +589,57 @@ void StackyFace::SetPowerSaveMode(bool on) {
     saver_want_ = on;
 }
 
+// 🔴 SETS A FLAG. DOES NO LVGL WORK. THIS IS NOT FASTIDIOUSNESS - the first
+//    version took DisplayLockGuard here and it hung the device.
+//
+//    The caller is the settings menu's switch callback, which runs inside the
+//    LVGL task, which ALREADY HOLDS the port lock. Taking it again deadlocks
+//    that task: the screen froze mid-menu, nothing responded, and the watchdog
+//    rebooted the robot a couple of seconds later. Worse, the NVS write came
+//    after this call, so the mute was never even saved - a privacy switch that
+//    appeared to work, hung the robot, and forgot.
+//
+//    Same rule as Tick() and the screensaver, ten lines down: cross into the
+//    LVGL task by leaving a flag for it, never by taking its lock.
+void StackyFace::SetMuted(bool muted) {
+    muted_ = muted;
+    muted_want_ = muted;
+}
+
+// Runs from Tick(), i.e. inside the LVGL task with the lock already held.
+//
+// Deliberately a WORD and not only a symbol: a small red dot on a robot's face
+// could mean recording just as easily as muted, and getting that backwards is
+// the worst possible way to be wrong about a microphone.
+void StackyFace::ApplyMuteBadge() {
+    const bool want = muted_want_;
+    if (want == muted_shown_) {
+        return;
+    }
+    muted_shown_ = want;
+    if (mute_badge_ == nullptr) {
+        if (!want) {
+            return;   // nothing built, nothing to hide
+        }
+        mute_badge_ = lv_label_create(lv_screen_active());
+        lv_label_set_text(mute_badge_, "MIC OFF");
+        lv_obj_set_style_text_color(mute_badge_, lv_color_hex(0xFF8E8E), 0);
+        lv_obj_set_style_bg_color(mute_badge_, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(mute_badge_, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_all(mute_badge_, 3, 0);
+        lv_obj_set_style_radius(mute_badge_, 4, 0);
+        lv_obj_align(mute_badge_, LV_ALIGN_BOTTOM_LEFT, 4, -4);
+    }
+    // NOT moved to the foreground: the settings menu is a full-screen overlay
+    // that raises itself, and a badge sitting on top of the row you are pressing
+    // is how it looked the first time.
+    if (want) {
+        lv_obj_clear_flag(mute_badge_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(mute_badge_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 // A photo should be the whole screen, not a stamp in the middle of it.
 //
 // LcdDisplay::SetupUI creates preview_image_ at width_/2 x height_/2 and
@@ -748,6 +799,10 @@ void StackyFace::Tick() {
     if (face_ == nullptr) {
         return;
     }
+
+    // Before the early return below: a muted robot must show it whatever else
+    // he is doing, including asleep behind the screensaver.
+    ApplyMuteBadge();
 
     // Pick up a sleep transition requested from the timer task. All the LVGL
     // work happens HERE, in the LVGL task - see SetPowerSaveMode.

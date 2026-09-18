@@ -239,8 +239,35 @@ bool CoreS3AudioCodec::BringUpMic() {
     return true;
 }
 
+void CoreS3AudioCodec::SetMicMuted(bool muted) {
+    if (mic_muted_ == muted) {
+        return;
+    }
+    mic_muted_ = muted;
+    if (muted) {
+        if (input_enabled_) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(input_dev_));
+            AudioCodec::EnableInput(false);
+        }
+        // WARN, not INFO: a muted robot looks identical to a broken one, and the
+        // log is where somebody goes to tell them apart.
+        ESP_LOGW(TAG, "microphone MUTED - input closed, wake word will not fire");
+    } else {
+        ESP_LOGI(TAG, "microphone unmuted");
+        if (input_wanted_) {
+            EnableInput(true);
+        }
+    }
+}
+
 void CoreS3AudioCodec::EnableInput(bool enable) {
     input_wanted_ = enable;
+    // Remembered, not obeyed. The application goes on asking for input as it
+    // changes state, and every one of those has to bounce off the mute rather
+    // than quietly reopening the microphone behind it.
+    if (mic_muted_ && enable) {
+        return;
+    }
     if (enable == input_enabled_) {
         return;
     }
@@ -480,6 +507,27 @@ int CoreS3AudioCodec::Read(int16_t* dest, int samples) {
     //
     //    So: keep trying while something is listening, and when there is nothing
     //    to give, hand over SILENCE rather than stale memory.
+    // Checked before the recovery path below, or the retry would fight the mute
+    // and reopen the microphone every 250ms.
+    if (mic_muted_) {
+        memset(dest, 0, samples * sizeof(int16_t));
+        // 🔴 AND IT HAS TO TAKE AS LONG AS A REAL READ. Returning instantly is
+        //    what a muted microphone looks like to this function, and it starves
+        //    the device: esp_codec_dev_read normally blocks until the samples
+        //    exist, which is what paces the audio input task. Hand back silence
+        //    with no delay and that task spins as fast as the CPU allows, which
+        //    took the 20ms touch poll with it - the screen still drew, the menu
+        //    still appeared, and nothing could be pressed or scrolled. The
+        //    watchdog reboot came from the same place.
+        //
+        //    So sleep for the time the samples represent. Silence still costs
+        //    what sound costs.
+        const int ms = input_sample_rate_ > 0
+                           ? (samples * 1000) / input_sample_rate_
+                           : 20;
+        vTaskDelay(pdMS_TO_TICKS(ms > 0 ? ms : 1));
+        return samples;
+    }
     if (!input_enabled_ && input_wanted_) {
         const int64_t now = esp_timer_get_time();
         if (now - last_in_retry_us_ >= 250000) {

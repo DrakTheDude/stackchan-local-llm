@@ -791,6 +791,12 @@ private:
     StackySettings settings_ui_;
     bool settings_built_ = false;
 
+    // 🔇 The privacy switches. Restored from NVS at boot - see
+    //    LoadPrivacySettings - because a mute that quietly lapses overnight is
+    //    worse than no mute at all.
+    bool mic_muted_ = false;
+    bool camera_off_ = false;
+
     // 🔴 LVGL HAS NO POINTER ON THIS BOARD, and that is deliberate rather than an
     //    omission. Touch is polled on a timer and turned into gestures; nothing
     //    in the conversation UI is meant to be tapped, and registering a pointer
@@ -1038,6 +1044,37 @@ private:
         }
     }
 
+    // 🔇 One place that puts the mute into effect, so the codec, the badge and
+    //    the stored value can never disagree. Called from the settings switch
+    //    (persist = true) and once at boot from the stored value (persist =
+    //    false, since writing back what was just read is pointless wear).
+    void ApplyMicMute(bool muted, bool persist) {
+        // 🔴 STORED FIRST. In the first version the write came last, after a call
+        //    that deadlocked - so the robot hung AND forgot the setting. For a
+        //    privacy switch the durable part is the part that must not depend on
+        //    everything after it succeeding.
+        if (persist) {
+            Settings settings("stackchan", true);
+            settings.SetInt("mic_muted", muted ? 1 : 0);
+        }
+        mic_muted_ = muted;
+        static_cast<CoreS3AudioCodec*>(GetAudioCodec())->SetMicMuted(muted);
+        if (face_ != nullptr) {
+            face_->SetMuted(muted);   // a flag; the LVGL task draws it
+        }
+    }
+
+    // Read once at boot, before anything opens the microphone.
+    void LoadPrivacySettings() {
+        Settings settings("stackchan", false);
+        mic_muted_ = settings.GetInt("mic_muted", 0) != 0;
+        camera_off_ = settings.GetInt("camera_off", 0) != 0;
+        if (mic_muted_ || camera_off_) {
+            ESP_LOGW(TAG, "privacy settings restored: microphone %s, camera %s",
+                     mic_muted_ ? "MUTED" : "on", camera_off_ ? "OFF" : "on");
+        }
+    }
+
     // Built on FIRST USE, not at boot. SetupUI() has not run when this board is
     // constructed, so there is no screen to parent onto yet - and a menu nobody
     // opens should not cost memory. By the time a finger has been held down for
@@ -1050,6 +1087,7 @@ private:
             ESP_LOGI(TAG, "settings closed");
             return;
         }
+        EnsureTouchIndev();
         if (!settings_built_) {
             settings_built_ = true;
             settings_ui_.Build(MakeSettingsActions());
@@ -1080,6 +1118,19 @@ private:
         a.set_brightness = [this](int v) {
             GetBacklight()->SetBrightness((uint8_t)v, true);
         };
+        // 🔇 Persisted, because a microphone you switched off should still be off
+        //    in the morning. Written immediately rather than on close: the way
+        //    people test a mute is to switch it off and pull the power.
+        a.get_mic_muted = [this]() { return mic_muted_; };
+        a.set_mic_muted = [this](bool muted) { ApplyMicMute(muted, true); };
+        a.get_camera_off = [this]() { return camera_off_; };
+        a.set_camera_off = [this](bool off) {
+            camera_off_ = off;
+            Settings settings("stackchan", true);
+            settings.SetInt("camera_off", off ? 1 : 0);
+            ESP_LOGW(TAG, "camera %s", off ? "OFF" : "on");
+        };
+
         a.about_rows = [this]() {
             // The server address as the firmware ACTUALLY resolves it - NVS
             // first, compiled value as the fallback - rather than as configured.
@@ -1148,16 +1199,33 @@ private:
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &touchpad_timer_));
         ESP_ERROR_CHECK(esp_timer_start_periodic(touchpad_timer_, 20 * 1000));
 
-        // The pointer LVGL does not otherwise have. Created DISABLED: while the
-        // conversation UI is on screen, taps are gestures and nothing is meant
-        // to be clicked. The settings menu switches it on and off again.
-        //
-        // The read callback does no I2C - it reports what the poll above last
-        // saw, so the FT6336 keeps exactly one reader and the LVGL task never
-        // waits on the shared bus.
+    }
+
+    // 🔴 CREATED LATE, UNDER THE LVGL LOCK, AND BOUND TO A DISPLAY EXPLICITLY.
+    //
+    //    The first version built this in the board constructor, and the result
+    //    was a menu that drew perfectly and could not be touched: the screen
+    //    still woke on a tap - so the poll was clearly running - but LVGL never
+    //    saw a pointer.
+    //
+    //    Two reasons, either enough on its own. The constructor runs before
+    //    SetupUI, so there was no default display for the new device to attach
+    //    itself to; and it ran outside the port lock, which is not a safe place
+    //    to be mutating LVGL's device list. Built here instead, on first use,
+    //    where the caller already holds the lock and the display certainly
+    //    exists.
+    //
+    //    The read callback does no I2C: it reports what the 20ms poll last saw,
+    //    so the FT6336 keeps exactly one reader and the LVGL task never waits on
+    //    the shared bus.
+    void EnsureTouchIndev() {
+        if (touch_indev_ != nullptr) {
+            return;
+        }
         touch_indev_ = lv_indev_create();
         lv_indev_set_type(touch_indev_, LV_INDEV_TYPE_POINTER);
         lv_indev_set_user_data(touch_indev_, this);
+        lv_indev_set_display(touch_indev_, lv_display_get_default());
         lv_indev_set_read_cb(touch_indev_, [](lv_indev_t* indev, lv_indev_data_t* data) {
             auto* board = static_cast<M5StackStackChanBoard*>(lv_indev_get_user_data(indev));
             data->point.x = board->touch_x_;
@@ -1165,7 +1233,10 @@ private:
             data->state = board->touch_down_ ? LV_INDEV_STATE_PRESSED
                                              : LV_INDEV_STATE_RELEASED;
         });
+        // Disabled by default: while the conversation UI is on screen, taps are
+        // gestures and nothing is meant to be clicked.
         lv_indev_enable(touch_indev_, false);
+        ESP_LOGI(TAG, "touch pointer registered for the settings menu");
     }
 
     void InitializeSpi() {
@@ -1719,6 +1790,11 @@ public:
     }
 
     M5StackStackChanBoard() {
+        // 🔇 FIRST, before anything can open the microphone. The mute is restored
+        //    from NVS, and a robot that listens for a second and a half on every
+        //    boot is not muted - it is mostly muted, which is not a thing anyone
+        //    wants to be told about their own microphone.
+        LoadPrivacySettings();
         InitializePowerSaveTimer();
         InitializeI2c();
         InitializeAxp2101();
@@ -1733,6 +1809,13 @@ public:
         InitializeCamera();
         InitializeFt6336TouchPad();
         GetBacklight()->RestoreBrightness();
+
+        // Now that the codec and the face both exist, put the restored mute into
+        // effect: close the input, and mark the screen. Not persisted - this is
+        // the value that was just read back.
+        if (mic_muted_) {
+            ApplyMicMute(true, false);
+        }
 
         head_.Initialize();
         head_.RegisterMcpTools();
@@ -1920,6 +2003,17 @@ public:
             PropertyList(),
             [this](const PropertyList&) -> ReturnValue {
                 if (camera_ == nullptr) return std::string("camera unavailable");
+                // 🔇 The switch is checked HERE, at the one place a frame is
+                //    captured, rather than by tearing the driver down. A refusal
+                //    the model can read back and explain beats a mysterious
+                //    failure, and it is phrased so it does not apologise for a
+                //    deliberate setting.
+                if (camera_off_) {
+                    return std::string(
+                        "The camera is switched off in the robot's settings. "
+                        "Nothing was captured. It can be turned back on by holding "
+                        "the screen for five seconds.");
+                }
 
                 // 📷 METER, then shoot. See the gc0308 namespace note: the
                 //    sensor's own AEC is pinned at the frame length and cannot

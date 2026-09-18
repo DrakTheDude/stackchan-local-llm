@@ -149,6 +149,51 @@ lv_obj_t* StackySettings::AddSlider(const char* text, int value, lv_event_cb_t c
     return slider;
 }
 
+// A switch row. The label says what the switch CONTROLS, and the switch reads on
+// = the thing is working - never "Mute: on", which leaves you working out what
+// the switch being off would mean.
+lv_obj_t* StackySettings::AddToggle(const char* text, bool on, lv_event_cb_t cb,
+                                    lv_obj_t** out_switch) {
+    lv_obj_t* row = lv_obj_create(list_);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, LV_PCT(100), kRowHeight);
+    lv_obj_set_style_bg_color(row, c_panel_, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(row, 6, 0);
+    lv_obj_set_style_pad_hor(row, 8, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* label = lv_label_create(row);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, c_text_, 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t* sw = lv_switch_create(row);
+    lv_obj_remove_style_all(sw);
+    lv_obj_set_size(sw, 50, 26);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, c_bg_, LV_PART_MAIN);
+    lv_obj_set_style_radius(sw, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    // The cast is not cosmetic: LVGL's selector is a part OR'd with a state, but
+    // the two are separate enum types, and -Werror rejects mixing them.
+    const lv_style_selector_t kIndicatorChecked =
+        static_cast<lv_style_selector_t>(LV_PART_INDICATOR) |
+        static_cast<lv_style_selector_t>(LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, kIndicatorChecked);
+    lv_obj_set_style_bg_color(sw, c_accent_, kIndicatorChecked);
+    lv_obj_set_style_radius(sw, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
+    lv_obj_set_style_bg_color(sw, c_text_, LV_PART_KNOB);
+    lv_obj_set_style_radius(sw, LV_RADIUS_CIRCLE, LV_PART_KNOB);
+    if (on) {
+        lv_obj_add_state(sw, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(sw, cb, LV_EVENT_VALUE_CHANGED, this);
+    if (out_switch != nullptr) *out_switch = sw;
+    return sw;
+}
+
 void StackySettings::BuildList() {
     list_ = lv_obj_create(root_);
     lv_obj_remove_style_all(list_);
@@ -194,6 +239,26 @@ void StackySettings::BuildList() {
         if (self->bright_value_) lv_label_set_text_fmt(self->bright_value_, "%d", v);
         if (self->actions_.set_brightness) self->actions_.set_brightness(v);
     }, &bright_value_);
+
+    // 🔇 THE PRIVACY SWITCHES, phrased as what they enable rather than what they
+    //    suppress. "Microphone: on" is unambiguous from across the room;
+    //    "Mute: off" is a double negative you have to stop and unpick, about the
+    //    one setting nobody should have to think twice about.
+    const bool mic_on = actions_.get_mic_muted ? !actions_.get_mic_muted() : true;
+    AddToggle("Microphone", mic_on, [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        auto* sw = static_cast<lv_obj_t*>(lv_event_get_target(e));
+        const bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+        if (self->actions_.set_mic_muted) self->actions_.set_mic_muted(!on);
+    }, &mic_switch_);
+
+    const bool cam_on = actions_.get_camera_off ? !actions_.get_camera_off() : true;
+    AddToggle("Camera", cam_on, [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        auto* sw = static_cast<lv_obj_t*>(lv_event_get_target(e));
+        const bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+        if (self->actions_.set_camera_off) self->actions_.set_camera_off(!on);
+    }, &cam_switch_);
 
     AddRow("Run self-check", [](lv_event_t* e) {
         auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));

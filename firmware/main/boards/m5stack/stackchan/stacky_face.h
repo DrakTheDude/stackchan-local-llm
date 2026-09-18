@@ -118,6 +118,14 @@ public:
     // source there is no status screen, and the display simply dims when idle.
     void SetStatusSource(StatusSource* s) { status_ = s; }
 
+    // 🔇 A MUTED ROBOT MUST LOOK MUTED. The mute survives a reboot, which is the
+    //    honest behaviour and also the dangerous one: without a mark on the
+    //    screen, the difference between "I switched his microphone off last
+    //    week" and "he is broken" is a memory nobody has. Drawn over the face,
+    //    so it is visible whenever he is.
+    void SetMuted(bool muted);
+    bool muted() const { return muted_; }
+
     // Public only so the expression table in the .cc can be a plain static
     // array at namespace scope. Nothing outside constructs these.
     struct EyeShape {
@@ -178,6 +186,8 @@ private:
 
     void BuildFace();
     void BuildScreensaver();
+    // Applies muted_want_. Called from Tick(), inside the LVGL task.
+    void ApplyMuteBadge();
     // Repaints the visible card from the status source.
     void PaintCard();
     void MakeEye(lv_obj_t* parent, Eye& eye, int centre_x);
@@ -191,6 +201,13 @@ private:
     void ApplyMouth(int w, int curve, int open_h);
 
     lv_obj_t* face_ = nullptr;
+    lv_obj_t* mute_badge_ = nullptr;   // built lazily, the first time he is muted
+    bool muted_ = false;
+    // muted_want_ is written from whatever task flips the switch; muted_shown_
+    // only from the LVGL task. Same split as saver_want_/saver_on_ below, and
+    // for the same reason - see SetMuted.
+    volatile bool muted_want_ = false;
+    bool muted_shown_ = false;
     Eye left_, right_;
     lv_obj_t* brow_l_ = nullptr;
     lv_obj_t* brow_r_ = nullptr;
