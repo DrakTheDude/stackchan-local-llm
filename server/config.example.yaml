@@ -29,7 +29,18 @@ server:
   websocket: ws://192.0.2.10:8000/xiaozhi/v1/
   vision_explain: http://192.0.2.10:8003/mcp/vision/explain
 
-  # Hours from UTC. Used for anything time-shaped he says.
+  # 🕐 HOURS from UTC, not minutes - the server multiplies by 60 before handing
+  #    it to the robot. This sets the ROBOT'S OWN clock.
+  #
+  # ⚠️ AND IT IS NOT THE ONLY PLACE TIME COMES FROM. What he SAYS the time is
+  #    comes from the container's clock, i.e. TZ in .env, because the current
+  #    time is substituted into his system prompt. Set one and not the other and
+  #    he will tell you a time his own clock disagrees with - which is how a
+  #    robot ends up confidently reporting the hour in a country you left.
+  #
+  # ⚠️ NO DAYLIGHT SAVING. TZ is a zone name and follows the clocks by itself;
+  #    this is a fixed number and does not. If your region changes twice a year,
+  #    so must this line.
   timezone_offset: +0
 
 log:
