@@ -1,0 +1,71 @@
+{
+  "model": "deepseek-v2:16b",
+  "hardware": "RTX 4090 24GB, ollama defaults",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "temperature": 0.75,
+  "thinking": "on (model default)",
+  "cold_load_s": null,
+  "ttft_s": 8.16,
+  "time_to_first_spoken_word_s": 8.16,
+  "silence_s": 0.0,
+  "max_tokens": 1200,
+  "tool_score": "0/6",
+  "tool_pct": null,
+  "tools_supported": false,
+  "median_latency_s": null,
+  "median_tok_s": 237.6,
+  "cases": [
+    {
+      "case": "direct",
+      "passes": 0,
+      "of": 1,
+      "notes": [
+        "the runtime refused the request: this model has no tool support here (HTTP 400)"
+      ]
+    },
+    {
+      "case": "indirect",
+      "passes": 0,
+      "of": 1,
+      "notes": [
+        "the runtime refused the request: this model has no tool support here (HTTP 400)"
+      ]
+    },
+    {
+      "case": "two-args",
+      "passes": 0,
+      "of": 1,
+      "notes": [
+        "the runtime refused the request: this model has no tool support here (HTTP 400)"
+      ]
+    },
+    {
+      "case": "no-args",
+      "passes": 0,
+      "of": 1,
+      "notes": [
+        "the runtime refused the request: this model has no tool support here (HTTP 400)"
+      ]
+    },
+    {
+      "case": "must-check",
+      "passes": 0,
+      "of": 1,
+      "notes": [
+        "the runtime refused the request: this model has no tool support here (HTTP 400)"
+      ]
+    },
+    {
+      "case": "must-not-call",
+      "passes": 0,
+      "of": 1,
+      "notes": [
+        "the runtime refused the request: this model has no tool support here (HTTP 400)"
+      ]
+    }
+  ],
+  "tok_s_measured_without_tools": true,
+  "resident_gb": 20.4,
+  "vram_gb": 20.4,
+  "on_gpu_pct": 100
+}

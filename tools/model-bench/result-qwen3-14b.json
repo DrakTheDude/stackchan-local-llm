@@ -1,0 +1,61 @@
+{
+  "model": "qwen3:14b",
+  "hardware": "RTX 4090 24GB, ollama defaults",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "temperature": 0.75,
+  "thinking": "on (model default)",
+  "cold_load_s": 7.0,
+  "ttft_s": 0.12,
+  "time_to_first_spoken_word_s": 1.76,
+  "silence_s": 1.64,
+  "max_tokens": 1200,
+  "tool_score": "15/18",
+  "tool_pct": 83,
+  "median_latency_s": 3.2,
+  "median_tok_s": 83.1,
+  "resident_gb": 14.5,
+  "vram_gb": 14.5,
+  "on_gpu_pct": 100,
+  "cases": [
+    {
+      "case": "direct",
+      "passes": 0,
+      "of": 3,
+      "notes": [
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure"
+      ]
+    },
+    {
+      "case": "indirect",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "two-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "no-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-check",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-not-call",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    }
+  ]
+}

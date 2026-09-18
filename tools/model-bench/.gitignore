@@ -1,2 +1,5 @@
-# Results are generated; the ones worth keeping go in docs/model-floor.md.
-result-*.json
+# Results ARE kept. They are the evidence behind the table in
+# docs/model-floor.md, which make-table.py generates FROM them - ignoring
+# them would mean nobody else could regenerate the page, and would leave a
+# hardware recommendation with nothing behind it.
+__pycache__/

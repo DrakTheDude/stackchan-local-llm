@@ -1,0 +1,58 @@
+{
+  "model": "gpt-oss:20b",
+  "hardware": "RTX 4090 24GB, ollama defaults",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "temperature": 0.75,
+  "thinking": "REQUESTED OFF BUT IGNORED - 4096 chars of thought",
+  "cold_load_s": 9.8,
+  "ttft_s": 0.09,
+  "time_to_first_spoken_word_s": 0.47,
+  "silence_s": 0.38,
+  "max_tokens": 1200,
+  "tool_score": "18/18",
+  "tool_pct": 100,
+  "tools_supported": true,
+  "median_latency_s": 0.39,
+  "median_tok_s": 161.4,
+  "resident_gb": 12.9,
+  "vram_gb": 12.9,
+  "on_gpu_pct": 100,
+  "cases": [
+    {
+      "case": "direct",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "indirect",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "two-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "no-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-check",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-not-call",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    }
+  ]
+}

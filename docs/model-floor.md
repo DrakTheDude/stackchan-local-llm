@@ -1,58 +1,210 @@
 # Which model do you actually need?
 
-> **Status: one model verified, the floor not yet measured.** This page says what is known and what is
-> guessed, and is marked so you can tell them apart. Measuring it properly is on
-> [the roadmap](roadmap.md).
+> **Status: measured.** Fifteen models, on one RTX 4090, through Ollama at its defaults, with the
+> shipped config's sampling settings. Every number here came out of
+> [`tools/model-bench/bench.py`](../tools/model-bench/bench.py), which you can run against your own
+> machine. The table below replaces a page of hypotheses, and it is worth saying that **most of those
+> hypotheses were wrong**.
 
-## What is verified
+## The short answer
 
-**Qwen3-32B at 4-bit, on a 24 GB GPU.** Tool calling reliable, 33–34 tokens/second, and the basis of
-every subjective judgement elsewhere in these docs. That is the configuration the reference robot has
-been running daily.
+| your card | run this | why |
+|---|---|---|
+| **8 GB** | `granite4:micro` | 5.0 GB, 83% on tools. The only capable thing that leaves room for a desktop |
+| **12 GB** | `qwen3:8b` | 10.0 GB and **100%** — the smallest model here that never missed a tool call |
+| **16 GB and up** | **`mistral-nemo:12b`** | 12.4 GB, **100%**, and it starts speaking in **0.09 s** |
+| **24 GB** | `gpt-oss:20b` | 12.9 GB, 100%, 154 tok/s, and ~10 GB left over for a vision model later |
 
-That is the whole of the verified column. Everything below is reasoning, not measurement.
+**If you change one thing, make it this one.** `mistral-nemo:12b` is the recommendation: perfect tool
+score, the fastest first word measured, and no reasoning to fight with.
+
+```bash
+./server/use-model.sh mistral-nemo:12b
+```
 
 ## What actually matters
 
 Not prose quality. **Tool calling.**
 
 A model that writes charming sentences and cannot call a tool turns this robot into a speaking clock —
-it will answer questions about your house from its own imagination rather than from the tools you gave
-it, and it will sound just as confident doing it. That failure is worse than a model that says "I don't
-know", because you cannot hear the difference.
+it answers questions about your house from its own imagination rather than from the tools you gave it,
+and it sounds just as confident doing it. That failure is worse than "I don't know", because you cannot
+hear the difference.
 
-So when you test a smaller model, do not ask it to chat. Ask it something that requires a tool, and
-check it actually called one. The server logs every tool call:
+So the bench scores six things that have observable right answers — which tool was called, with which
+arguments — and one case that exists to catch the opposite failure: a model that calls a tool for
+*"tell me a story about a lighthouse"* is not being thorough, it is unusable.
 
-```bash
-docker compose logs xiaozhi | grep -i "执行工具"    # "executing tool"
-```
+## Everything measured
 
-Three things to watch for, in the order they break:
+<!-- BENCH TABLE START -->
+| model | shape | tools | speaks after | tok/s | VRAM | fits |
+|---|---|---|---|---|---|---|
+| `qwen3:8b`<br>*thinking off* | dense, 8B | **100%** | 0.07 s | 131.7 | 10.0 GB | 12 GB |
+| `mistral-nemo:12b` | dense, 12B | **100%** | 0.09 s | 101.4 | 12.4 GB | 16 GB |
+| `qwen3:14b`<br>*thinking off* | dense, 14B | **100%** | 0.09 s | 80.6 | 14.5 GB | 24 GB |
+| `granite4:small-h` | MoE, 32B / 9B active | **100%** | 0.32 s | 59.2 | 20.4 GB | 24 GB |
+| `gpt-oss:20b` | MoE, 21B / 3.6B active | **100%** | 0.34 s | 154.3 | 12.9 GB | 16 GB |
+| `qwen3:32b`<br>*thinking off* | dense, 32B | **100%** | 0.5 s | 9.4 | 22.9 GB<br>⚠️ 79% on GPU | more than 24 GB |
+| `qwen3:30b-a3b` | MoE, 30B / 3B active | **100%** | 1.07 s | 210.0 | 21.7 GB | 24 GB |
+| `qwen3:8b` | dense, 8B | **100%** | 2.24 s | 138.2 | 10.0 GB | 12 GB |
+| `qwen3:32b` | dense, 32B | **100%** | 17.38 s | 9.5 | 22.9 GB<br>⚠️ 79% on GPU | more than 24 GB |
+| `qwen3:30b-a3b`<br>*thinking off* | MoE, 30B / 3B active | **94%** | 0.07 s | 211.6 | 21.7 GB | 24 GB |
+| `granite4:micro` | dense, 3B | **83%** | 0.05 s | 209.3 | 5.0 GB | 6 GB |
+| `granite4:tiny-h` | MoE, 7B / 1B active | **83%** | 0.15 s | 122.4 | 4.7 GB | 6 GB |
+| `qwen3:14b` | dense, 14B | **83%** | 1.76 s | 83.1 | 14.5 GB | 24 GB |
+| `qwen3:4b`<br>*thinking off* | dense, 4B | **78%** | 0.11 s | 212.4 | 7.5 GB | 12 GB |
+| `qwen3:4b` | dense, 4B | **78%** | 4.35 s | 212.0 | 7.5 GB | 12 GB |
+| `mistral-small3.2:24b` | dense, 24B | **67%** | 0.15 s | 54.1 | 19.6 GB | 24 GB |
+| `llama3.1:8b` | dense, 8B | **61%** | 0.06 s | 137.5 | 9.2 GB | 12 GB |
+| `granite3.3:8b` | dense, 8B | **22%** | 0.08 s | 120.3 | 10.6 GB | 12 GB |
+| `gemma3:12b` | dense, 12B | *refused* | — | 81.0 | 8.1 GB | 12 GB |
+| `deepseek-v2:16b` | MoE, 16B / 2.4B active | *refused* | — | 237.6 | 20.4 GB | 24 GB |
 
-1. **It stops calling tools** and answers from memory instead.
-2. **It calls the wrong one**, or invents arguments.
-3. **It calls one and then ignores the result**, narrating something else.
+- `gpt-oss:20b` does not honour `think: false` — it has its own reasoning control, so there is no *thinking off* row for it.
+- `qwen3:32b` did **not fit**: only 79% of it was on the card and the rest ran on system RAM, which is the whole explanation for its single-digit tok/s. That is a fact about a 24 GB card, not about the model — llama.cpp runs the same weights at 37.9 tok/s with a tighter quantisation.
+- `gemma3:12b` has **no tool support** in this runtime — every request came back `HTTP 400`. Its speed is measured without tools; it has no score because it was never allowed to try.
+- `deepseek-v2:16b` has **no tool support** in this runtime — every request came back `HTTP 400`. Its speed is measured without tools; it has no score because it was never allowed to try.
+<!-- BENCH TABLE END -->
 
-## What to expect, unmeasured
+`tools` is the share of 18 scored attempts that did the right thing. **`speaks after` is the one to
+read for a robot you talk to**: not time to first token, but time to the first word the speaker would
+actually utter. For a reasoning model those are wildly different numbers, and the gap is silence.
 
-Community experience and the shape of the problem both suggest smaller models lose tool calling before
-they lose fluency — which is the worst possible order for this use. Treat the following as hypotheses
-to test, not guidance to follow:
+## Three things the measurements overturned
 
-| size | expectation |
-|---|---|
-| ~30B | likely fine — closest to the verified configuration |
-| ~14B | the interesting one. Probably the smallest that is dependable, and it fits a 12 GB card |
-| ~8B | may work with simple tools and few of them; expect the failures above under pressure |
-| ~4B | expected to fail at tools. Worth running once so the failure is documented rather than assumed |
+**Size is not the variable.** `mistral-small3.2:24b` scored **67% while using 19.6 GB** — worse than a
+3B model at a quarter of the card. `granite3.3:8b` managed 22%. Meanwhile `granite4:micro` gets 83% in
+5.0 GB. Tool *training* is what separates these, and it does not track parameter count at all.
+
+**Small MoE did not beat small dense.** This was the interesting hypothesis and it is the one with a
+clean experiment behind it: `granite4:tiny-h` (MoE, 1B active) against `granite4:micro` (dense 3B) —
+same lab, same training, same day. They score **identically at 83%**, and the MoE is *slower* per token,
+122 against 209. Every other MoE-versus-dense comparison also changes the lab and the training data, so
+it can rank models but cannot answer the question. MoE earns its keep higher up — `gpt-oss:20b` reaches
+100% in 12.9 GB, and `qwen3:30b-a3b` runs at 210 tok/s where the dense 32B manages 38 — but "small MoE
+is the way" did not survive contact with the measurement.
+
+**What speed actually tracks is *active* parameters**, which is the whole mechanism and worth stating
+plainly, because it makes the table predictable:
+
+| active | model | tok/s |
+|---|---|---|
+| 2.4B | `deepseek-v2:16b` (MoE, 16B total) | **237.6** |
+| 3B | `qwen3:30b-a3b` (MoE, 30B total) | 210.0 |
+| 3B | `granite4:micro` (dense) | 209.3 |
+| 4B | `qwen3:4b` (dense) | 212.0 |
+| 8B | `qwen3:8b` (dense) | 138.2 |
+| 12B | `mistral-nemo:12b` (dense) | 101.4 |
+| 24B | `mistral-small3.2:24b` (dense) | 54.1 |
+
+A 30B model generating at the speed of a 4B, because only 3B of it is read per token. Dense has no such
+lever — it slows steadily as it grows. So the honest summary of the trade is that **MoE converts VRAM
+into quality at constant speed, where dense converts VRAM into quality at falling speed**: `qwen3:4b`
+and `qwen3:30b-a3b` both run at ~210 tok/s, and the extra 14 GB bought a far better model rather than a
+faster one.
+
+The exception proves it is about active size rather than about being MoE: `granite4:small-h` has **9B
+active and manages 59 tok/s** — slower than every dense 8B measured here.
+
+**The old guesses on this page were backwards in the middle.** It said ~14B was "probably the smallest
+that is dependable" and ~4B was "expected to fail". In fact `qwen3:8b` scores **100%** while
+`qwen3:14b` manages only 83% as shipped, and `qwen3:4b` reaches 78% rather than failing outright. The
+14B's every error was running out of its token budget while thinking — which is the next section.
+
+**And the biggest model here could not be measured properly at all.** `qwen3:32b` needed 22.9 GB and
+Ollama could fit only 79% of it on a 24 GB card, running the rest on system RAM at 9.5 tok/s. That is a
+fact about the card, not the model — llama.cpp runs the same weights at 37.9 tok/s with a tighter
+quantisation. A 32B dense model is not a 24 GB model in practice, whatever the file size suggests.
+
+## Reasoning costs you the conversation
+
+Models that think before answering pay for it in silence, and on these tasks they bought nothing:
+
+| | thinking on | thinking off |
+|---|---|---|
+| `qwen3:8b` | 100%, speaks after **2.24 s** | 100%, speaks after **0.07 s** |
+| `qwen3:14b` | **83%**, speaks after 1.76 s | **100%**, speaks after 0.09 s |
+| `qwen3:4b` | 78%, speaks after **4.35 s** | 78%, speaks after 0.11 s |
+| `qwen3:30b-a3b` | 100%, 1.07 s | 94%, 0.07 s |
+| `qwen3:32b` | 100%, speaks after **17.38 s** | 100%, 0.50 s |
+
+Up to seventeen seconds of a robot staring at you. On a screen you would see a spinner and know to
+wait; out loud there is nothing at all, and he looks like he did not hear you.
+
+And on `qwen3:14b` — the model this project ships by default — **reasoning made it worse**: 83% with
+thinking on, 100% with it off. Every one of its failures was running out of the token budget
+mid-thought and returning empty, which is silence rather than a wrong answer.
+
+🔴 **And the switch everyone quotes does not work.** Measured on `qwen3:8b`, same question, same budget:
+
+| how `/no_think` was sent | reply | characters thought |
+|---|---|---|
+| nothing (baseline) | 2.10 s | 916 |
+| in the **system** prompt | 3.03 s | **1631** — it thought *more* |
+| in the **user** message | 1.55 s | 701 |
+| `think: false` to the **OpenAI-compatible** endpoint | 3.07 s | 861 — accepted and ignored |
+| `think: false` to Ollama's **own** `/api/chat` | **0.33 s** | **0** |
+
+Only the last one works. The third row matters to this project specifically: **the server's Ollama
+provider prepends `/no_think` to the user's message for any model named `qwen3*`** and then calls the
+OpenAI-compatible endpoint. So today, on the shipped default, the robot is thinking while the software
+believes it is not — and the instruction is also visible to the model as part of what you said.
+
+That is why the recommendation above is a model that does not reason at all rather than a Qwen with
+reasoning "disabled". Making that switch real is a server patch, not a config change.
+
+## A model can also be refused rather than bad
+
+`gemma3:12b` is in the table with **no score at all**, because every request came back `HTTP 400`:
+Ollama will not send tools to a model whose template has no tool support. Scored naively that is 0%,
+which reads as "tried and failed" and would be a slur on a capable model. It was never allowed to try.
 
 ⚠️ **The chat template matters as much as the size.** A model that "cannot call tools" is often a model
-whose template was not applied — llama.cpp needs `--jinja`, and Ollama depends on the tag's own
-template. Rule that out before blaming the model.
+whose template was not applied — llama.cpp needs `--jinja`, Ollama depends on the tag's own template.
+Rule that out before blaming the model.
+
+## Run it on your own machine
+
+```bash
+python3 tools/model-bench/bench.py \
+    --base-url http://127.0.0.1:11434/v1 \
+    --ollama-host http://127.0.0.1:11434 \
+    --model qwen3:8b --repeats 3
+```
+
+Standard library only, no dependencies. `--ollama-host` adds how much card the model took and whether
+all of it fit; `--no-think` measures the same model with reasoning off, and **refuses to run** against
+anything that cannot honour it rather than quietly reporting a thinking model as a fast one.
+
+Then swap the robot over with one command:
+
+```bash
+./server/use-model.sh <tag>
+```
 
 ## Helping
 
-If you run a smaller model, the numbers worth reporting are: the model and quantisation, whether tool
-calls happened at all, how it failed when it failed, and tokens/second. Failures are more useful than
-successes here — an honest "8B could not do it" saves everyone else the evening.
+Numbers from a different card are the most useful thing you can send. The bench writes a JSON file per
+model; that file plus your GPU is a complete report. **Failures are worth more than successes** — an
+honest "this one could not do it on 8 GB" saves everyone else the evening.
+
+---
+
+### How these were measured, and what nearly went wrong
+
+Recorded because each of these produced a confident wrong number first, and the same traps are waiting
+for anyone who repeats this:
+
+- **`max_tokens` too small silently gags a reasoning model.** At 300 tokens, `qwen3:30b-a3b` spent the
+  whole budget thinking and returned `finish_reason: length` with **empty content** — scored as
+  "answered from its own head". It measured 56%; it is a 100% model. The bench now uses the shipped
+  config's 1200 and reports truncation as truncation.
+- **Single-turn scoring punishes a model for being careful.** Asked to set the volume, a good model may
+  first read the current one. In the robot that is one turn of a loop; scored single-turn it looks like
+  a miss. A read-only first call now earns a second turn with the reading fed back.
+- **Time-to-first-token flatters reasoning models.** Their first token arrives in 0.1 s and is a
+  thought. The figure quoted here is time to the first *spoken* word.
+- **The first request of a run measures your disk.** 5.92 s to first token was 4.6 s of model loading.
+  There is a warm-up call now, and cold load is its own field.
+- **A refused request is not a score of zero.** See `gemma3:12b` above.

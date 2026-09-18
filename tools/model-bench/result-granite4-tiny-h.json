@@ -1,0 +1,61 @@
+{
+  "model": "granite4:tiny-h",
+  "hardware": "RTX 4090 24GB, ollama defaults",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "temperature": 0.75,
+  "thinking": "on (model default)",
+  "cold_load_s": 4.1,
+  "ttft_s": 0.15,
+  "time_to_first_spoken_word_s": 0.15,
+  "silence_s": 0.0,
+  "max_tokens": 1200,
+  "tool_score": "15/18",
+  "tool_pct": 83,
+  "median_latency_s": 0.21,
+  "median_tok_s": 122.4,
+  "resident_gb": 4.7,
+  "vram_gb": 4.7,
+  "on_gpu_pct": 100,
+  "cases": [
+    {
+      "case": "direct",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "indirect",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "two-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "no-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-check",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-not-call",
+      "passes": 0,
+      "of": 3,
+      "notes": [
+        "called self_audio_speaker_set_volume when it should have answered",
+        "called self_get_device_status when it should have answered",
+        "called self_audio_speaker_set_volume when it should have answered"
+      ]
+    }
+  ]
+}

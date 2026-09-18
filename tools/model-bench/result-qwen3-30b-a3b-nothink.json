@@ -1,0 +1,60 @@
+{
+  "model": "qwen3:30b-a3b",
+  "hardware": "RTX 4090 24GB, ollama defaults",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "temperature": 0.75,
+  "thinking": "off (verified)",
+  "cold_load_s": 0.9,
+  "ttft_s": 0.07,
+  "time_to_first_spoken_word_s": 0.07,
+  "silence_s": 0.0,
+  "max_tokens": 1200,
+  "tool_score": "17/18",
+  "tool_pct": 94,
+  "tools_supported": true,
+  "median_latency_s": 1.4,
+  "median_tok_s": 211.6,
+  "resident_gb": 21.7,
+  "vram_gb": 21.7,
+  "on_gpu_pct": 100,
+  "cases": [
+    {
+      "case": "direct",
+      "passes": 2,
+      "of": 3,
+      "notes": [
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure"
+      ]
+    },
+    {
+      "case": "indirect",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "two-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "no-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-check",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-not-call",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    }
+  ]
+}
