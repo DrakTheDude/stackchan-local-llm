@@ -254,6 +254,32 @@ services:
       - ./data:/opt/xiaozhi-esp32-server/data
     networks: [stackchan]
 
+  # ---------------------------------------------------------------------------
+  # 🤖 AN OPTIONAL ROBOT VOICE. Not started by default:
+  #      docker compose --profile robotvoice up -d
+  #
+  #    Kokoro's 68 voices are all people, and flattening one gives you a bored
+  #    human rather than a machine. espeak-ng is a FORMANT SYNTHESISER - the same
+  #    class of technology as MacinTalk, which is what a period machine actually
+  #    sounded like. For a period body it is not a downgrade, it is the correct
+  #    instrument, and the whole image is a few tens of megabytes on the CPU.
+  #
+  #    To use it, point the TTS provider at it in your config:
+  #      api_url: http://espeak:8890/v1/audio/speech
+  #      voice:   en-us+m3      # +mN / +fN change the formant model, not the accent
+  #      format:  wav
+  #
+  # ⚠️ NOT PUBLISHED TO A PORT. It runs text through a subprocess, which is fine
+  #    between containers on a compose network and would not be fine on an
+  #    interface somebody else can reach.
+  espeak:
+    build: ./espeak
+    container_name: stackchan-espeak
+    restart: unless-stopped
+    profiles: [robotvoice]
+    networks: [stackchan]
+
+
 volumes:
   ollama:
   whisper:
