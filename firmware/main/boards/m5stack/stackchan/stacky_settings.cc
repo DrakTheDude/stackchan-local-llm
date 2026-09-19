@@ -95,6 +95,17 @@ lv_obj_t* StackySettings::AddRow(const char* text, lv_event_cb_t cb) {
     return btn;
 }
 
+// The row's label is its first child - see AddRow, which creates exactly one.
+// Kept here rather than inline so that assumption lives next to the code that
+// makes it true.
+void StackySettings::SetCharacterLabel(const char* label) {
+    if (character_row_ == nullptr || label == nullptr) return;
+    lv_obj_t* text = lv_obj_get_child(character_row_, 0);
+    if (text != nullptr) {
+        lv_label_set_text_fmt(text, "Character: %s", label);
+    }
+}
+
 lv_obj_t* StackySettings::AddSlider(const char* text, int value, lv_event_cb_t cb,
                                     lv_obj_t** out_value_label) {
     // ⚠️ A SLIDER IS TALLER THAN ITS TRACK. The knob is drawn centred on the
@@ -264,6 +275,19 @@ void StackySettings::BuildList() {
         auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
         if (self->actions_.self_check) self->actions_.self_check();
     });
+
+    // 🎭 THE CHARACTER ROW. Tapping steps to the next one and relabels itself,
+    //    so which character is in force is readable without opening anything -
+    //    the two halves of a character can drift, and being able to see what
+    //    this half thinks it is wearing is how anybody notices.
+    character_row_ = AddRow("Character", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        if (!self->actions_.next_character) return;
+        self->SetCharacterLabel(self->actions_.next_character());
+    });
+    if (actions_.character_label) {
+        SetCharacterLabel(actions_.character_label());
+    }
 
     AddRow("Motion check", [](lv_event_t* e) {
         auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));

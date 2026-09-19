@@ -38,6 +38,12 @@ public:
         // 📐 Traces a square with the head, so a character's motion tokens can
         //    be SEEN. See StackChanHead::TraceSquare.
         std::function<void()> motion_check;
+        // 🎭 Steps to the next character and returns its label. One row rather
+        //    than a submenu: the menu is a column of rows, there are four
+        //    characters, and a picker is a bigger change than the feature needs.
+        std::function<const char*()> next_character;
+        // What to show when the menu is first built.
+        std::function<const char*()> character_label;
         std::function<void(int)> set_volume;      // 0..100
         std::function<int()> get_volume;
         std::function<void(int)> set_brightness;  // 0..100
@@ -72,6 +78,7 @@ private:
     // change under a robot that has been running for a week.
     void FillAbout();
     lv_obj_t* AddRow(const char* text, lv_event_cb_t cb);
+    void SetCharacterLabel(const char* label);
     lv_obj_t* AddSlider(const char* text, int value, lv_event_cb_t cb, lv_obj_t** out_value_label);
     lv_obj_t* AddToggle(const char* text, bool on, lv_event_cb_t cb, lv_obj_t** out_switch);
 
@@ -86,6 +93,7 @@ private:
     lv_obj_t* bright_value_ = nullptr;
     lv_obj_t* mic_switch_ = nullptr;
     lv_obj_t* cam_switch_ = nullptr;
+    lv_obj_t* character_row_ = nullptr;   // relabelled as the character changes
     lv_obj_t* toast_ = nullptr;    // transient feedback, e.g. the self-check result
 
     // Theme colours, read once at Build() so a restyle is one place to change.

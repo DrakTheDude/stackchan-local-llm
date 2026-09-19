@@ -128,4 +128,89 @@ inline float TiltDeg(float base_deg) {
     return std::clamp(base_deg * CurrentMotion().gesture_unit, -kMaxTiltDeg, kMaxTiltDeg);
 }
 
+
+// 🎭 A CHARACTER: the whole bundle, under one name.
+//
+//    Look and motion together is the entire point - "heavily caffeinated" is not
+//    a palette and it is not a speed, it is both at once, and a bundle that only
+//    carried one half would need two edits to be anybody.
+//
+//    The server's half (voice, persona) is NOT here and must not be. Firmware
+//    never learns what a prompt is; the server never learns about brow
+//    thickness. The NAME is the only thing both sides share.
+struct Character {
+    const char* id;      // what is stored in NVS and shared with the server
+    const char* label;   // what the settings menu shows
+    Look look;
+    Motion motion;
+};
+
+// 🔴 THE TABLE IS THE REGISTRY. No parallel list of names exists anywhere, and
+//    none should: two sources drift the moment somebody adds a character and
+//    forgets the other, which costs an afternoon the first time a new entry
+//    silently does not appear in the menu.
+//
+// ⚠️ EVERY VALUE HERE IS INSIDE THE CLAMPS ON PURPOSE. The clamps exist because
+//    a character will one day arrive from a file or a network message; the
+//    built-ins should not be the reason anybody learns that.
+inline constexpr Character kCharacters[] = {
+    // The robot as he has always been. Every unit at 1.0, which makes the
+    // arithmetic an identity - this entry must never change behaviour.
+    {"default", "Default",
+     Look{1.00f}, Motion{1.00f, 1.00f}},
+
+    // Quick, and looks further. Shorter durations, wider glances, eyes a little
+    // larger - the example the design note is written around.
+    {"caffeinated", "Caffeinated",
+     Look{1.08f}, Motion{0.55f, 1.35f}},
+
+    // Slow side to side, barely turning his head. Not a new animation: the same
+    // glance behaviour with a long duration and a small amplitude, which is the
+    // test of whether these tokens carry enough.
+    {"fivebell", "Five in the morning",
+     Look{0.88f}, Motion{2.20f, 0.40f}},
+
+    // 📐 THE INSTRUMENT, and it is NOT a look. It exists to be applied during
+    //    testing so you can see WHAT CHANGED - anything that does not move is
+    //    hardcoded. Everything is at a bound, deliberately: a subtle instrument
+    //    hides exactly the failures it is meant to find.
+    //
+    //    Run it with the Motion check row and watch the square.
+    {"testpattern", "Test pattern (instrument)",
+     Look{kMaxFaceUnit}, Motion{0.35f, 2.50f}},
+};
+
+inline constexpr int kCharacterCount =
+    sizeof(kCharacters) / sizeof(kCharacters[0]);
+
+// The one in force. Held by id so the About page and the server can both say
+// which character each half thinks it is wearing - a drift somebody has to be
+// able to see from across the room.
+inline const char*& CurrentId() {
+    static const char* id = kCharacters[0].id;
+    return id;
+}
+
+// Apply a bundle. Takes a Character rather than an index, so the server override
+// in stage 2 needs no new path - it builds one and calls this.
+inline void Apply(const Character& c) {
+    CurrentLook() = c.look;
+    CurrentMotion() = c.motion;
+    CurrentId() = c.id;
+}
+
+// Returns nullptr for an unknown id, which is the honest answer: an id stored by
+// an older build, or sent by a server that knows a character this firmware does
+// not, should fall back to the default rather than guess at a near match.
+inline const Character* Find(const char* id) {
+    if (id == nullptr) return nullptr;
+    for (const auto& c : kCharacters) {
+        const char* a = c.id;
+        const char* b = id;
+        while (*a != '\0' && *a == *b) { ++a; ++b; }
+        if (*a == '\0' && *b == '\0') return &c;
+    }
+    return nullptr;
+}
+
 }  // namespace character

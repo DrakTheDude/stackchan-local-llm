@@ -2,6 +2,7 @@
 #include "stackchan_leds.h"
 #include "stacky_face.h"
 #include "stacky_settings.h"
+#include "character.h"
 #include <esp_app_desc.h>
 #include <esp_netif.h>
 #include "status_source.h"
@@ -785,6 +786,42 @@ private:
         face_->SetNoServer(unset);
     }
 
+    // 🎭 THE CHARACTER IN FORCE. Stored by id, not by index: an index shifts
+    //    the moment somebody inserts a character into the table, and the robot
+    //    would quietly come back as somebody else.
+    void LoadCharacter() {
+        Settings settings("stackchan", false);
+        const std::string id = settings.GetString("character", "default");
+        const auto* c = character::Find(id.c_str());
+        if (c == nullptr) {
+            // An id from a newer build, or a typo. The default is the honest
+            // answer - guessing at a near match would be worse than resetting.
+            ESP_LOGW(TAG, "unknown character '%s' - falling back to default", id.c_str());
+            c = &character::kCharacters[0];
+        }
+        character::Apply(*c);
+        ESP_LOGI(TAG, "character: %s", c->label);
+    }
+
+    // Steps to the next character, persists it, and returns its label for the
+    // menu row. Wraps, so four taps come back to where it started.
+    const char* NextCharacter() {
+        int index = 0;
+        for (int i = 0; i < character::kCharacterCount; i++) {
+            if (character::kCharacters[i].id == character::CurrentId()) {
+                index = i;
+                break;
+            }
+        }
+        const auto& next =
+            character::kCharacters[(index + 1) % character::kCharacterCount];
+        character::Apply(next);
+        Settings settings("stackchan", true);
+        settings.SetString("character", next.id);
+        ESP_LOGI(TAG, "character -> %s", next.label);
+        return next.label;
+    }
+
     void LoadPrivacySettings() {
         Settings settings("stackchan", false);
         mic_muted_ = settings.GetInt("mic_muted", 0) != 0;
@@ -821,6 +858,11 @@ private:
         StackySettings::Actions a;
         a.wifi_setup = [this]() { EnterWifiConfigMode(); };
         a.motion_check = [this]() { head_.TraceSquare(); };
+        a.next_character = [this]() { return NextCharacter(); };
+        a.character_label = []() {
+            const auto* c = character::Find(character::CurrentId());
+            return c != nullptr ? c->label : character::kCharacters[0].label;
+        };
         a.self_check = [this]() {
             // The same check the boot chime reports, on demand - which is what
             // the factory firmware's "Hardware Test" was for. It takes seconds
@@ -1600,6 +1642,10 @@ public:
     }
 
     M5StackStackChanBoard() {
+        // 🎭 Before the face exists, so he is never briefly somebody else. A
+        //    character applied after the first frame is a visible flash, and on a
+        //    robot with a physical face that reads as a personality change.
+        LoadCharacter();
         // 🔇 FIRST, before anything can open the microphone. The mute is restored
         //    from NVS, and a robot that listens for a second and a half on every
         //    boot is not muted - it is mostly muted, which is not a thing anyone
