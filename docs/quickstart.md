@@ -17,6 +17,18 @@ connection the downloads dominate and there is nothing anyone can do about that.
 - 2.4 GHz Wi-Fi. The radio in this robot cannot see a 5 GHz network, so if your router hides both
   behind one name, the robot will look broken while everything else works
 
+**Or just ask:**
+
+```bash
+./deploy/check-deps.sh
+```
+
+It checks all of the above and prints the exact command for anything missing. It installs nothing —
+every dependency here is one where installing it silently would be rude or dangerous, so it shows you
+the command and lets you read it first. On Windows, run `deploy/check-deps.ps1` **as well**: two of
+the settings that most often stop the robot connecting live on that side and cannot be seen from
+inside WSL.
+
 ---
 
 ## 0. Back up the factory firmware. First. Before anything.

@@ -34,3 +34,7 @@ server/.env
 .claude/settings.local.json
 .vscode/
 __pycache__/
+
+# The dependency checker writes a log beside itself. Useful to paste into an
+# issue, not something to commit.
+deploy/check-deps.log
