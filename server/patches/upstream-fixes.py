@@ -18,6 +18,30 @@ from pathlib import Path
 ROOT = Path("/opt/xiaozhi-esp32-server")
 
 REPLACEMENTS = [
+    # 🔴 THE FEW-SHOT EXAMPLE WAS ANSWERING REAL GREETINGS.
+    #
+    #    Injected into every conversation to demonstrate direct_answer, it
+    #    showed a short user message answered with "Sure - what sort? Something
+    #    with a bit of adventure, or something daft?". Said "Hi, Stack Chan",
+    #    the model reproduced it, and every conversation opened by asking what
+    #    sort of story the user wanted.
+    #
+    #    The example needs to demonstrate the CALL, not supply a personality.
+    #    This keeps the shape and replaces the content with a flat factual
+    #    exchange nobody would mistake for an opening line.
+    #
+    # ⚠️ Worth reporting upstream: any wording here becomes a thing the robot
+    #    says unprompted, which is not obvious from the code.
+    (
+        "core/connection.py",
+        '''self.dialogue.put(Message(role="user", content="Tell me a story", is_temporary=True))''',
+        '''self.dialogue.put(Message(role="user", content="How many nodes are there?", is_temporary=True))''',
+    ),
+    (
+        "core/connection.py",
+        '''"function": {"arguments": \'{"response": "Sure - what sort? Something with a bit of adventure, or something daft?"}\', "name": "direct_answer"},''',
+        '''"function": {"arguments": \'{"response": "Four, and all of them are up."}\', "name": "direct_answer"},''',
+    ),
     # 🕐 THE CLOCK THE MODEL IS SHOWN, because telling it to convert does not
     #    work. The prompt substitutes {{current_time}} as "21:07" and the persona
     #    then asks for spoken, twelve-hour time - and the model says "twenty one
