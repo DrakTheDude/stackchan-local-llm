@@ -33,6 +33,29 @@ ROOT = Path("/opt/xiaozhi-esp32-server")
 
 # (file, old, new). Exact, anchored strings - no regex, nothing clever.
 REPLACEMENTS = [
+    # 👁 THE VISION PROVIDER, which appends this to EVERY question it asks about
+    #    a photo - unconditionally, in code, below any config anyone can reach.
+    #
+    #    Measured live against a local vision model: the description came back
+    #    as "我看到一个黄色的圆和一个红色的矩形" - correct, and unusable, because
+    #    it goes straight to a text-to-speech voice speaking English.
+    #
+    # ⚠️ IT HID HERE FOR AS LONG AS VISION WAS OFF. The path had never run, so
+    #    no amount of using the robot could surface it. Worth remembering for
+    #    the next feature that gets switched on: the Chinese in a code path is
+    #    not found by the pass, it is found by running the path.
+    #
+    #    Replaced rather than deleted: this answer is SPOKEN, and the vision
+    #    model has no persona telling it to be brief. Without that it writes a
+    #    paragraph and the robot reads all of it.
+    (
+        "core/providers/vllm/openai.py",
+        'question = question + "(请使用中文回复)"',
+        'question = question + (\n'
+        '            " Answer in one short sentence of plain English, as if saying it"\n'
+        '            " out loud. No markdown, no lists."\n'
+        '        )',
+    ),
     # The catch-all tool offered on EVERY turn. A Chinese description on the one
     # tool the model reaches for most is the strongest single nudge toward
     # Chinese output in the whole server.

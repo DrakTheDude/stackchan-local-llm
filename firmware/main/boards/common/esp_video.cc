@@ -909,6 +909,30 @@ bool EspVideo::SetVFlip(bool enabled) {
  * @note waits for any previous encoding thread to finish before starting
  * @warning returns an error message if the camera buffer is empty or the network connection fails
  */
+void EspVideo::SetExplainImage(const uint8_t* data, size_t len, uint16_t w, uint16_t h,
+                               v4l2_pix_fmt_t format) {
+    if (explain_image_ != nullptr) {
+        heap_caps_free(explain_image_);
+        explain_image_ = nullptr;
+        explain_image_len_ = 0;
+    }
+    if (data == nullptr || len == 0) {
+        return;
+    }
+    // PSRAM: this is a whole frame, and it is short-lived either way.
+    explain_image_ = static_cast<uint8_t*>(
+        heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (explain_image_ == nullptr) {
+        ESP_LOGW(TAG, "no room for an explain image; the raw frame will be sent");
+        return;
+    }
+    memcpy(explain_image_, data, len);
+    explain_image_len_ = len;
+    explain_image_w_ = w;
+    explain_image_h_ = h;
+    explain_image_format_ = format;
+}
+
 std::string EspVideo::Explain(const std::string& question) {
     if (explain_url_.empty()) {
         throw std::runtime_error("Image explain URL or token is not set");
@@ -923,11 +947,14 @@ std::string EspVideo::Explain(const std::string& question) {
 
     // We spawn a thread to encode the image to JPEG using optimized encoder (cost about 500ms and 8KB SRAM)
     encoder_thread_ = std::thread([this, jpeg_queue]() {
-        uint16_t w = frame_.width ? frame_.width : 320;
-        uint16_t h = frame_.height ? frame_.height : 240;
-        v4l2_pix_fmt_t enc_fmt = frame_.format;
+        // The prepared frame if the board gave us one - see SetExplainImage.
+        uint8_t* src = explain_image_ ? explain_image_ : frame_.data;
+        const size_t src_len = explain_image_ ? explain_image_len_ : frame_.len;
+        uint16_t w = explain_image_ ? explain_image_w_ : (frame_.width ? frame_.width : 320);
+        uint16_t h = explain_image_ ? explain_image_h_ : (frame_.height ? frame_.height : 240);
+        v4l2_pix_fmt_t enc_fmt = explain_image_ ? explain_image_format_ : frame_.format;
         bool ok = image_to_jpeg_cb(
-            frame_.data, frame_.len, w, h, enc_fmt, 80,
+            src, src_len, w, h, enc_fmt, 80,
             [](void* arg, size_t index, const void* data, size_t len) -> size_t {
                 auto jpeg_queue = static_cast<QueueHandle_t>(arg);
                 JpegChunk chunk = {.data = nullptr, .len = len};

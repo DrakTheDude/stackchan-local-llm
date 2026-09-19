@@ -19,7 +19,31 @@ CONFIG_BOARD_TYPE_M5STACK_STACKCHAN=y
 CONFIG_SPIRAM_MODE_QUAD=y
 CONFIG_CAMERA_GC0308=y
 CONFIG_CAMERA_GC0308_AUTO_DETECT_DVP_INTERFACE_SENSOR=y
+# 📷 THE SENSOR RUNS AT VGA, AND THE FRAME IS AVERAGED DOWN AFTERWARDS.
+#
+#    Not for resolution - the panel is 320x240 - but for LIGHT. Exposure is
+#    counted in row times, and this mode's rows are twice as long as the
+#    320x240 subsampled mode's (HB 0x6A against 0x32), so the same exposure
+#    value collects twice as much. The slower frame (16fps against 20) lifts
+#    the ceiling again.
+#
+#    Measured at the ceiling in the 320x240 mode, in a lit room: mean luma 31.
+#    Everything wrong with those photos - grey, no colour, dither showing in
+#    the blacks - was a tone curve trying to rescue that.
+#
+# ⚠️ This is also the driver's OWN default. The override to 320x240 came in
+#    with the port, and matching the panel was the wrong reason for it.
+# ⚠️ VGA IS PARKED, NOT ABANDONED - see the note above. VIDIOC_STREAMON runs at
+#    init, so the sensor streams CONTINUOUSLY from boot whether or not anybody
+#    wants a photo: 9.8 MB/s of DMA into PSRAM at 640x480/16fps against 3.1 at
+#    320x240/20fps. The wake-word engine shares that bus, and detection went
+#    spotty the moment this was enabled.
+#
+#    The fix is to stream only while taking a photo, which is a change to the
+#    capture path rather than to a config line. Until that exists, this stays at
+#    QVGA and the picture stays dark.
 CONFIG_CAMERA_GC0308_DVP_YUV422_320X240_20FPS=y
+CONFIG_CAMERA_GC0308_DVP_DEFAULT_FMT_YUV422_320X240_20FPS=y
 CONFIG_LANGUAGE_EN_US=y
 
 # The server address the robot asks for its voice session.

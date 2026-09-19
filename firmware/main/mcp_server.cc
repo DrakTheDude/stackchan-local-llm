@@ -98,7 +98,7 @@ void McpServer::AddCommonTools() {
     }
 
     auto camera = board.GetCamera();
-    if (camera) {
+    if (camera && board.UseStockCameraTool()) {
         AddTool("self.camera.take_photo",
             "Always remember you have a camera. If the user asks you to see something, use this tool to take a photo and then explain it.\n"
             "Args:\n"

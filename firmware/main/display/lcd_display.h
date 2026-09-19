@@ -9,7 +9,11 @@
 #include <atomic>
 #include <memory>
 
-#define PREVIEW_IMAGE_DURATION_MS 5000
+// 📷 LONG ENOUGH TO BE TALKED ABOUT. Five seconds sounds generous and is
+//    not: describing the photo costs a second or two, the reply has to be
+//    spoken after that, and the picture vanished while the robot was still
+//    saying what was in it. The photo IS the interaction - it can sit there.
+#define PREVIEW_IMAGE_DURATION_MS 20000
 
 class LcdDisplay : public LvglDisplay {
 protected:

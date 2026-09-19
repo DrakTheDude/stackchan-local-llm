@@ -40,6 +40,11 @@ private:
     };
     std::vector<MmapBuffer> mmap_buffers_;
     std::string explain_url_;
+    uint8_t* explain_image_ = nullptr;      // owned; see SetExplainImage
+    size_t explain_image_len_ = 0;
+    uint16_t explain_image_w_ = 0;
+    uint16_t explain_image_h_ = 0;
+    v4l2_pix_fmt_t explain_image_format_ = 0;
     std::string explain_token_;
     std::thread encoder_thread_;
     bool auto_preview_ = true;
@@ -54,6 +59,23 @@ public:
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;
     virtual std::string Explain(const std::string& question);
+    virtual bool CanExplain() const { return !explain_url_.empty(); }
+
+    // 🔴 SHOW THE MODEL WHAT THE PERSON IS LOOKING AT.
+    //
+    //    Explain() encodes the raw sensor frame. On this camera that frame is
+    //    dark - measured mean luma 31 in a lit room, because the sensor is at
+    //    its exposure ceiling at 20fps - and the picture on screen only looks
+    //    right because the board black-points and tone-curves it first.
+    //
+    //    Sending the raw one meant the owner saw a lit room and the model said
+    //    "a dark room". Neither was wrong; they were given different pictures.
+    //
+    //    Set this to the frame the screen is showing, and Explain() sends that
+    //    instead. The buffer is COPIED, because the display takes ownership of
+    //    the original. Cleared automatically after the next Explain().
+    void SetExplainImage(const uint8_t* data, size_t len, uint16_t w, uint16_t h,
+                         v4l2_pix_fmt_t format);
 
     // Read-only access to the last captured frame.
     //

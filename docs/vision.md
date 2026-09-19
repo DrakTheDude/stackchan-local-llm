@@ -1,7 +1,39 @@
-# Could he see? What local vision costs
+# Letting him see, locally
 
-**Short answer: yes, and it is cheaper than expected — about 4 GB and a third of a second per photo.**
-It is not wired up yet, and this page is the measurement plus what stands in the way.
+**It works, and it is cheaper than expected: about 4 GB of VRAM and a third of a second per photo.**
+He takes the picture, shows it on his own screen, and tells you what is in it — with the model on a
+machine you own.
+
+## Turning it on
+
+Two things, and the second is what actually switches it:
+
+```bash
+./server/use-model.sh qwen2.5vl:3b      # or: ollama pull qwen2.5vl:3b
+```
+
+Then in `server/data/.config.yaml`:
+
+```yaml
+selected_module:
+  VLLM: LocalVLM          # add this line
+
+VLLM:                     # and this block
+  LocalVLM:
+    type: openai
+    base_url: http://ollama:11434/v1
+    model_name: qwen2.5vl:3b
+    api_key: ollama       # Ollama ignores it; the client library insists
+    max_tokens: 200       # it is going to be spoken aloud
+    temperature: 0.4
+```
+
+Restart the server. **Remove those and he goes back to simply showing you the photo** — that is not a
+fallback, it is the other supported mode, and the firmware needs no change either way: the server
+offers a vision URL only when it has a model, so with none configured the camera has nowhere to send
+anything.
+
+## What it costs
 
 The camera works today: he takes a photo, tone-maps it on the device and shows it on his own screen.
 What he cannot do is *describe* it. That is deliberate — see [the privacy checklist](privacy.md). The
@@ -47,11 +79,9 @@ Both stay resident together; nothing is evicted and no swap cost is paid per pho
 The 8 GB row is the awkward one: it fits only by taking the vision model that gets things wrong. At
 12 GB you can have both a chat model that scores 100% and an eye that can be trusted.
 
-## What stands in the way
+## What it took, and what nearly went wrong
 
-Three things, in increasing order of work:
-
-**1. The server already has a provider, and it speaks Chinese.** `core/providers/vllm/openai.py` takes
+**1. The server already had a provider, and it spoke Chinese.** `core/providers/vllm/openai.py` takes
 a `base_url`, a `model_name` and an `api_key`, so pointing it at a local Ollama is configuration rather
 than code. But it does this to every question:
 
@@ -63,14 +93,40 @@ def response(self, question, base64_image):
 Hardcoded, unconditional, and invisible until now because this code path has never run. It belongs in
 the same asserted patch kit as every other Chinese string the model is shown.
 
-**2. `GetCamera()` returns `nullptr`.** Deliberate, and the comment says why. Returning a real camera
-means the frame goes to the server's vision endpoint — which is exactly what you want once that
-endpoint is a model on your own machine, and exactly what you do not want while it is a default
-pointing at a cloud.
+**2. `GetCamera()` returned `nullptr`, and that one line was doing two jobs.** It refused the stock
+cloud-shaped `take_photo` tool *and* refused to accept any vision URL. Local vision needs the second,
+so the camera is handed back now and a new `UseStockCameraTool()` holds the first door instead. The
+control is the same size; it was attached to the wrong thing. [privacy.md](privacy.md) has the check
+that replaced the old one.
 
-**3. Nobody has pointed a robot at a room yet.** Everything above is measurement. The interesting
-question — whether a 3B model usefully describes a dim desk through a 0.3 MP sensor — has not been
-asked.
+**3. The model and the person were looking at different pictures.** `Explain()` JPEG-encodes the raw
+sensor frame, which on this camera meters at **mean luma 31** in a lit room. The screen shows the
+output of the board's tone curve, which is why it looks fine to you. So the owner saw a lit room and
+the model said "a dark room", and both were describing what they were given. The board now hands the
+*prepared* frame to `Explain()`.
+
+**4. The first version read JSON aloud.** `Explain()` returns the server's envelope —
+`{"success":true,"action":"RESPONSE","response":"..."}` — and passing the whole thing into the tool
+result put a robot one step away from speaking it. Only the sentence goes through now.
+
+## Still open: the picture itself
+
+Vision works and is fast. The **photograph** is not good — dark, desaturated, with dither visible in
+the blacks — and that is a capture problem rather than a vision one.
+
+The cause is understood: exposure on this sensor is counted in row times, and the 320×240 mode's rows
+are half the length of the 640×480 mode's (`HB 0x32` against `0x6A`). At VGA the same exposure value
+collects twice the light, and averaging 2×2 back down to the panel's size would recover colour and
+noise as well.
+
+⚠️ **And it cannot simply be switched on.** `VIDIOC_STREAMON` runs at init, so the sensor streams
+continuously from boot whether or not anyone wants a photo — 9.8 MB/s of DMA into PSRAM at VGA
+against 3.1 at QVGA. The wake-word engine shares that bus, and detection went spotty the moment VGA
+was enabled. It was reverted.
+
+The fix is to stream only while taking a photo, which also removes the 3 MB/s the current setup burns
+permanently for a camera used seconds a day. Until that exists, the mode stays at QVGA and the
+picture stays dark.
 
 ## Why this matters more than it looks
 

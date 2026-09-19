@@ -498,6 +498,63 @@ static void LumaRange(const uint8_t* src, size_t len, v4l2_pix_fmt_t fmt, int* l
 //    So: if the picture is wrong again, read the diag line in the tool result
 //    FIRST. mean and gain together say whether there is light to work with, and
 //    only if there is does anything below this line deserve adjusting.
+// 🔻 AVERAGE A VGA FRAME DOWN TO THE PANEL'S SIZE, in YUV, before anything
+//    else looks at it.
+//
+//    Four samples per output pixel. That is a two-stop improvement in noise for
+//    free, and because the CHROMA is averaged as well it is most of the reason
+//    colour survives in a dim room - a single noisy sample has its colour
+//    swamped, four averaged ones do not.
+//
+//    Done here rather than by asking the sensor for 320x240, because the
+//    sensor's own 320x240 mode SUBSAMPLES (throws three of every four pixels
+//    away) and, worse, halves the row time. See the sdkconfig note.
+//
+// ⚠️ Byte order is discovered, not assumed - same as ToRgb565 below, and for
+//    the same reason: this driver has been seen to disagree with itself about
+//    UYVY and YUYV.
+static uint8_t* HalveUyvy(const uint8_t* src, size_t src_len, int w, int h, bool luma_even) {
+    if (src == nullptr || (w & 1) || (h & 1)) return nullptr;
+    const int ow = w / 2, oh = h / 2;
+    const size_t need = static_cast<size_t>(ow) * oh * 2;
+    if (src_len < static_cast<size_t>(w) * h * 2) return nullptr;
+
+    uint8_t* dst = static_cast<uint8_t*>(
+        heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (dst == nullptr) return nullptr;
+
+    const int yo = luma_even ? 0 : 1;   // luma byte within each pair
+    const int co = luma_even ? 1 : 0;   // chroma byte within each pair
+    const size_t row = static_cast<size_t>(w) * 2;
+
+    for (int oy = 0; oy < oh; oy++) {
+        const uint8_t* r0 = src + row * (oy * 2);
+        const uint8_t* r1 = r0 + row;
+        uint8_t* out = dst + static_cast<size_t>(ow) * 2 * oy;
+        for (int ox = 0; ox < ow; ox++) {
+            // One output PAIR covers two input pairs across and two rows down,
+            // i.e. 16 bytes in, 4 bytes out.
+            const uint8_t* a = r0 + static_cast<size_t>(ox) * 8;
+            const uint8_t* b = r1 + static_cast<size_t>(ox) * 8;
+
+            // Four luma samples per output pixel, twice (two output pixels).
+            const int y0 = (a[yo] + a[yo + 2] + b[yo] + b[yo + 2] + 2) / 4;
+            const int y1 = (a[yo + 4] + a[yo + 6] + b[yo + 4] + b[yo + 6] + 2) / 4;
+            // U and V each appear once per input pair; average the four in the
+            // 2x2 block. co lands on U for the first pair, V for the second.
+            const int u = (a[co] + b[co] + a[co + 4] + b[co + 4] + 2) / 4;
+            const int v = (a[co + 2] + b[co + 2] + a[co + 6] + b[co + 6] + 2) / 4;
+
+            uint8_t* o = out + static_cast<size_t>(ox) * 4;
+            o[luma_even ? 0 : 1] = static_cast<uint8_t>(y0);
+            o[luma_even ? 1 : 0] = static_cast<uint8_t>(u);
+            o[luma_even ? 2 : 3] = static_cast<uint8_t>(y1);
+            o[luma_even ? 3 : 2] = static_cast<uint8_t>(v);
+        }
+    }
+    return dst;
+}
+
 static uint8_t* ToRgb565(const uint8_t* src, size_t src_len, int w, int h,
                          v4l2_pix_fmt_t declared, std::string* diag = nullptr) {
     const size_t need = static_cast<size_t>(w) * h * 2;
@@ -2030,13 +2087,42 @@ public:
     // Adding a key would "fix" it by sending pictures of the room to a third
     // party, which is exactly the exposure this project removes. So the photo
     // goes to the robot's own screen instead. No server, no model, no round trip.
+    // Explain() hands back the server's envelope:
+    //
+    //     {"success":true,"action":"RESPONSE","response":"A red mug on a desk."}
+    //
+    // Only the sentence is any use. The first version passed the whole thing
+    // into the tool result, which is a robot one step away from reading JSON
+    // out loud. Hand-parsed rather than adding a dependency for one field, and
+    // it falls back to the raw string if the shape ever changes - an odd
+    // sentence beats no description at all.
+    static std::string VisionSentence(const std::string& raw) {
+        const std::string key = "\"response\":\"";
+        const size_t start = raw.find(key);
+        if (start == std::string::npos) return raw;
+        std::string out;
+        for (size_t i = start + key.size(); i < raw.size(); i++) {
+            const char c = raw[i];
+            if (c == '\\' && i + 1 < raw.size()) {
+                const char n = raw[++i];
+                out += (n == 'n' || n == 't') ? ' ' : n;   // \" and \\ land here too
+                continue;
+            }
+            if (c == '"') break;
+            out += c;
+        }
+        return out.empty() ? raw : out;
+    }
+
     void RegisterCameraTool() {
         auto& mcp = McpServer::GetInstance();
         mcp.AddTool(
             "self.camera.show_photo",
             "Take a photo with the robot's camera and show it on the robot's own screen. "
             "Use this when someone asks you to take a picture or show them what you can see. "
-            "The photo stays on the device; you cannot see or describe it yourself.",
+            "If this robot has a vision model, the result also tells you what is in the "
+            "picture, and you should say so in your own words. If it does not, the photo "
+            "simply stays on the device and you cannot see it.",
             PropertyList(),
             [this](const PropertyList&) -> ReturnValue {
                 if (camera_ == nullptr) return std::string("camera unavailable");
@@ -2169,14 +2255,36 @@ public:
                 }
 
                 uint8_t* rgb = nullptr;
+                uint16_t out_w = w, out_h = h;
                 if (fmt == V4L2_PIX_FMT_YUYV || fmt == V4L2_PIX_FMT_UYVY) {
+                    const uint8_t* conv = data;
+                    size_t conv_len = camera_->frame_len();
+                    uint8_t* halved = nullptr;
+                    // 🔻 A VGA FRAME IS AVERAGED DOWN FIRST. The sensor runs at
+                    //    640x480 for the light (twice the row time - see
+                    //    sdkconfig.defaults.stackchan), and the panel is
+                    //    320x240, so the spare resolution is spent on noise and
+                    //    colour rather than thrown away by subsampling.
+                    if (w == 640 && h == 480) {
+                        halved = yuv422::HalveUyvy(data, conv_len, w, h,
+                                                   yuv422::LumaEven(data, conv_len));
+                        if (halved != nullptr) {
+                            conv = halved;
+                            conv_len = static_cast<size_t>(w / 2) * (h / 2) * 2;
+                            out_w = w / 2;
+                            out_h = h / 2;
+                        } else {
+                            ESP_LOGW(TAG, "photo: no PSRAM to halve the frame; sending it whole");
+                        }
+                    }
                     std::string frame_diag;
-                    rgb = yuv422::ToRgb565(data, camera_->frame_len(), w, h, fmt, &frame_diag);
+                    rgb = yuv422::ToRgb565(conv, conv_len, out_w, out_h, fmt, &frame_diag);
                     if (!frame_diag.empty()) diag = frame_diag + "  " + diag;
+                    if (halved != nullptr) heap_caps_free(halved);
                 } else if (fmt == V4L2_PIX_FMT_RGB565) {
                     // Already what the panel wants. Copy anyway: the preview
                     // outlives this call and EspVideo reuses its frame buffer.
-                    const size_t n = static_cast<size_t>(w) * h * 2;
+                    const size_t n = static_cast<size_t>(out_w) * out_h * 2;
                     rgb = static_cast<uint8_t*>(
                         heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
                     if (rgb != nullptr) memcpy(rgb, data, n);
@@ -2189,15 +2297,51 @@ public:
                 }
 
                 display_->SetPreviewImage(std::make_unique<LvglAllocatedImage>(
-                    rgb, static_cast<size_t>(w) * h * 2, w, h, w * 2, LV_COLOR_FORMAT_RGB565));
+                    rgb, static_cast<size_t>(out_w) * out_h * 2, out_w, out_h, out_w * 2,
+                    LV_COLOR_FORMAT_RGB565));
                 // 🔴 This tool must never report failure for anything the model
                 //    could "fix" by trying again. It cannot see the photo - by
                 //    design - so a failure string just makes it apologise and
                 //    retry, which is what "I'm still having trouble taking the
                 //    photo" was: the tool succeeded and said something that
                 //    read like an error.
+                // 👁 AND IF THERE IS AN EYE, USE IT. CanExplain() is false unless
+                //    the server offered a vision URL, which it only does when a
+                //    vision model is configured - so a setup without one takes
+                //    this branch never and behaves exactly as before.
+                //
+                // ⚠️ AFTER the photo is on the screen, deliberately. The picture
+                //    appearing is what the person in the room is waiting for;
+                //    describing it costs a second or so more, and doing it first
+                //    would make the screen look slow to no purpose.
+                //
+                //    A failure here is NOT reported as one. The photo succeeded
+                //    and is visible, and a robot that says "I had trouble" with
+                //    a picture sitting on its face is the exact behaviour that
+                //    cost an evening before.
+                std::string seen;
+                if (camera_->CanExplain()) {
+                    // The picture the SCREEN is showing, not the raw frame - the
+                    // sensor's own output meters at 31 in a lit room and the
+                    // model duly called it "a dark room" while its owner was
+                    // looking at something perfectly legible. Copied before the
+                    // display takes ownership below.
+                    camera_->SetExplainImage(rgb, static_cast<size_t>(out_w) * out_h * 2,
+                                             out_w, out_h, V4L2_PIX_FMT_RGB565);
+                    try {
+                        seen = VisionSentence(camera_->Explain("What do you see?"));
+                        ESP_LOGI(TAG, "vision: %s", seen.c_str());
+                    } catch (const std::exception& e) {
+                        ESP_LOGW(TAG, "vision unavailable: %s", e.what());
+                    }
+                }
+
                 // The sentence first, the numbers after, so the model has
                 // something plain to say and does not read diagnostics aloud.
+                if (!seen.empty()) {
+                    return std::string("Photo taken and shown on the robot's screen. "
+                                       "The camera sees: ") + seen + " [diag " + diag + "]";
+                }
                 return std::string("Photo taken and shown on the robot's screen. [diag ") + diag +
                        "]";
             });
@@ -2255,8 +2399,33 @@ public:
     //    list; it picked take_photo, that failed inside the server with
     //    "VLLM API key not set", and it announced it was having trouble - after
     //    the photo was already on the screen.
+    // 👁 THE CAMERA IS HANDED BACK NOW, AND THE PRIVACY CONTROL MOVED RATHER
+    //    THAN WENT AWAY.
+    //
+    //    This returned nullptr for as long as the only vision path on offer was
+    //    somebody else's cloud: refusing the handle meant the stock take_photo
+    //    tool was never registered AND the explain URL was never even accepted.
+    //    One `return nullptr` closed both doors.
+    //
+    //    With a vision model running on the owner's own machine the second door
+    //    is the feature, so the handle comes back - and the first door is now
+    //    held by UseStockCameraTool() below instead. The control is the same
+    //    size, it is just no longer attached to the wrong thing.
+    //
+    // 🔑 AND IT IS STILL OFF BY DEFAULT, because the SERVER decides: no vision
+    //    model configured means no vision URL in its capabilities, which means
+    //    CanExplain() stays false and show_photo behaves exactly as it always
+    //    has. Nothing here opts anybody in.
     virtual Camera* GetCamera() override {
-        return nullptr;
+        return camera_;
+    }
+
+    // Our own show_photo is the camera tool. Upstream's take_photo would be a
+    // second one that also takes a picture, and when both were offered the
+    // model reached for that one, it failed inside the server, and he
+    // apologised for trouble after the photo was already on the screen.
+    virtual bool UseStockCameraTool() const override {
+        return false;
     }
 
     // 🔴 This used to enable/disable the power save timer on the discharging

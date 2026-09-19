@@ -73,6 +73,14 @@ public:
     virtual bool GetTemperature(float& esp32temp);
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();
+
+    // Whether to register upstream's `self.camera.take_photo`.
+    //
+    // A board that provides its own camera tool says false here, so the model
+    // is not offered two tools that both take a picture. Returning a camera
+    // from GetCamera() is then about accepting the vision URL, not about
+    // opting into the stock tool.
+    virtual bool UseStockCameraTool() const { return true; }
     virtual NetworkInterface* GetNetwork() = 0;
     virtual void StartNetwork() = 0;
     virtual void SetNetworkEventCallback(NetworkEventCallback callback) { (void)callback; }

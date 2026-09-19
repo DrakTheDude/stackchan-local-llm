@@ -40,23 +40,48 @@ anything else — particularly a vendor's API — that is a finding, and worth a
 Worth knowing what is *absent*: there is **no NTP server** in the image. The clock comes from your own
 server's reply, so the robot does not quietly reach a time service either.
 
-## 2. Confirm the cloud vision path is off
+## 2. Confirm the camera talks to you, or to nobody
 
-The upstream firmware can send camera frames to a vision endpoint for captioning. That default is a
-cloud API, and it is the single worst leak available on this hardware — pictures of your room.
+The upstream firmware can send camera frames to a vision endpoint for captioning. Its default is a
+cloud API, and that is the single worst leak available on this hardware — pictures of your room.
+
+> ⚠️ **This check changed, and it is weaker than it was.** It used to say: verify `GetCamera()`
+> returns `nullptr`, which refused the vision path outright. That one line was refusing two things at
+> once — the stock cloud-shaped tool, *and* the ability to accept any vision URL at all — so local
+> vision could not exist alongside it. The camera now hands back a real object, and **a frame can
+> leave the device**. What you can still verify is exactly where it goes, and that nothing goes
+> anywhere unless you asked for it.
+
+**First: the stock tool is still not registered.**
 
 ```bash
-grep -A2 "Camera\* GetCamera" firmware/main/boards/m5stack/stackchan/m5stack_stackchan.cc
+grep -A2 "UseStockCameraTool" firmware/main/boards/m5stack/stackchan/m5stack_stackchan.cc
 ```
 
-**A pass looks like** a function body containing `return nullptr;` — nothing else. If it returns a
-camera object, the cloud vision path is reachable and the rest of this page does not hold.
+**A pass looks like** `return false;`. That tool's body is capture-then-post; ours shows the photo on
+the robot's own screen and only describes it if you configured something to describe it with.
 
-The common code reaches `GetCamera()` from exactly two places and both are that path: the stock `take_photo` tool, and the code that stores whatever vision URL the
-server offers. With `nullptr`, the tool is never registered and a vision URL is never even accepted.
+**Second: nothing is sent unless a vision model is configured.** The robot cannot invent a
+destination — it uses the vision URL the server offers, and the server offers one only when it has a
+model. So the default state of a fresh install is still "the photo stays on the device":
 
-The camera still works — `self.camera.show_photo` captures and draws on the robot's own screen — it
-simply has nowhere off-device to send anything.
+```bash
+grep -A3 "^selected_module:" server/data/.config.yaml | grep VLLM
+```
+
+**No output is a pass** in the strongest sense: no `VLLM` entry means no vision URL, which means the
+camera has nowhere to send anything and `show_photo` behaves as it always did.
+
+**Third: if you did configure one, check where it points.**
+
+```bash
+grep -A4 "^VLLM:" server/data/.config.yaml
+```
+
+**A pass looks like** a `base_url` on your own machine — `http://ollama:11434/v1`,
+`http://host.docker.internal:11434/v1`, or a box on your own network. A hostname you do not recognise
+is the leak this page exists to find. See [vision.md](vision.md) for what that costs and what it
+buys.
 
 ## 3. Confirm the server's own plugins cannot call out
 
