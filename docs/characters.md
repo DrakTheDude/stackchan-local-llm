@@ -187,11 +187,18 @@ small resolver expands the scale once). Never at authoring time.
 The sibling project's audit is the most transferable idea in its whole token system, and it is worth
 stealing before the first character is written rather than after.
 
-**The instrument is a deliberately hideous character.** Every token swung to a value nothing in the
-real design resembles — a face in colours that clash, a `motion_unit` far off 1, amplitudes at the
-clamp. Apply it, and **anything that does not move is hardcoded.** A subtle test character hides
-exactly the failures it exists to find, which is why the sibling project's is called `test-hideous`
-and never appears in its picker.
+**The instrument is a deliberately hideous character — and it is not a character.** That distinction
+is load-bearing. It is never offered as a look, never tidied, never judged as a design; it exists to
+be applied during testing so you can see *what changed*, and anything that did not change is
+hardcoded. It is a measuring tool that happens to be rendered.
+
+Every token swung to a value nothing in the real design resembles — a face in colours that clash, a
+`motion_unit` far off 1, amplitudes at the clamp. A subtle test character hides exactly the failures
+it exists to find, which is why the sibling project's is called `test-hideous` and carries no
+annotation, so it can be applied by hand and never reaches the picker.
+
+⚠️ The failure mode to guard against is somebody making it presentable. The moment it is pleasant
+enough to ship, it is no longer capable of proving anything.
 
 Three guards there are worth copying exactly:
 
