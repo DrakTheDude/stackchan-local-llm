@@ -149,24 +149,37 @@ void McpServer::AddUserOnlyTools() {
         });
 
     // Firmware upgrade
-    AddUserOnlyTool("self.upgrade_firmware", "Upgrade firmware from a specific URL. This will download and install the firmware, then reboot the device.",
-        PropertyList({
-            Property("url", kPropertyTypeString, "The URL of the firmware binary file to download and install")
-        }),
-        [this](const PropertyList& properties) -> ReturnValue {
-            auto url = properties["url"].value<std::string>();
-            ESP_LOGI(TAG, "User requested firmware upgrade from URL: %s", url.c_str());
-            
-            auto& app = Application::GetInstance();
-            app.Schedule([url, &app]() {
-                bool success = app.UpgradeFirmware(url);
-                if (!success) {
-                    ESP_LOGE(TAG, "Firmware upgrade failed");
-                }
-            });
-            
-            return true;
-        });
+    // 🔴 FOUR UPSTREAM TOOLS ARE REMOVED BY THIS FORK, and the reason is not
+    //    that they are dangerous in the abstract - it is that "user only" does
+    //    not gate anything.
+    //
+    //    Upstream keeps them out of tools/list unless the caller asks, and then
+    //    DoToolCall looks a tool up BY NAME and runs it with no user_only()
+    //    check at any point. The entire protection is that the name is not
+    //    advertised - which protects nothing on a device whose only input is a
+    //    microphone, that has no confirmation step, driven by a model that has
+    //    already invented a tool name unprompted on this project.
+    //
+    //      self.upgrade_firmware        URL -> download -> flash -> reboot.
+    //                                   Code execution, from a spoken string.
+    //      self.assets.set_download_url the same, one step back.
+    //      self.screen.snapshot         captures the screen and UPLOADS it to a
+    //                                   URL. Exfiltration of whatever is shown.
+    //      self.screen.preview_image    fetches a URL and displays it. Arbitrary
+    //                                   content on the robot's face, and a
+    //                                   request out from inside the network.
+    //
+    //    Kept: get_system_info and screen.get_info, both read-only; and reboot,
+    //    which is recoverable, useful for support, and a nuisance rather than a
+    //    breach if misheard.
+    //
+    // ⚠️ OTA IS UNAFFECTED. The boot-time update check is ota.cc against
+    //    CONFIG_OTA_URL. This tool was the phone app's way of pushing an
+    //    arbitrary URL, which this project does not use.
+    //
+    // ⚠️ DELETED, NOT #if'd. A conditional is one config change from being back.
+    //    claims.ini asserts these names stay out of the built binary.
+
 
     // Display control
 #ifdef HAVE_LVGL
@@ -186,115 +199,9 @@ void McpServer::AddUserOnlyTools() {
                 return json;
             });
 
-#if CONFIG_LV_USE_SNAPSHOT
-        AddUserOnlyTool("self.screen.snapshot", "Snapshot the screen and upload it to a specific URL",
-            PropertyList({
-                Property("url", kPropertyTypeString),
-                Property("quality", kPropertyTypeInteger, 80, 1, 100)
-            }),
-            [display](const PropertyList& properties) -> ReturnValue {
-                auto url = properties["url"].value<std::string>();
-                auto quality = properties["quality"].value<int>();
-
-                std::string jpeg_data;
-                if (!display->SnapshotToJpeg(jpeg_data, quality)) {
-                    throw std::runtime_error("Failed to snapshot screen");
-                }
-
-                ESP_LOGI(TAG, "Upload snapshot %u bytes to %s", jpeg_data.size(), url.c_str());
-                
-                // build the multipart/form-data request body
-                std::string boundary = "----ESP32_SCREEN_SNAPSHOT_BOUNDARY";
-                
-                auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
-                http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-                if (!http->Open("POST", url)) {
-                    throw std::runtime_error("Failed to open URL: " + url);
-                }
-                {
-                    // file field header
-                    std::string file_header;
-                    file_header += "--" + boundary + "\r\n";
-                    file_header += "Content-Disposition: form-data; name=\"file\"; filename=\"screenshot.jpg\"\r\n";
-                    file_header += "Content-Type: image/jpeg\r\n";
-                    file_header += "\r\n";
-                    http->Write(file_header.c_str(), file_header.size());
-                }
-
-                // JPEG data
-                http->Write((const char*)jpeg_data.data(), jpeg_data.size());
-
-                {
-                    // multipart trailer
-                    std::string multipart_footer;
-                    multipart_footer += "\r\n--" + boundary + "--\r\n";
-                    http->Write(multipart_footer.c_str(), multipart_footer.size());
-                }
-                http->Write("", 0);
-
-                if (http->GetStatusCode() != 200) {
-                    throw std::runtime_error("Unexpected status code: " + std::to_string(http->GetStatusCode()));
-                }
-                std::string result = http->ReadAll();
-                http->Close();
-                ESP_LOGI(TAG, "Snapshot screen result: %s", result.c_str());
-                return true;
-            });
-        
-        AddUserOnlyTool("self.screen.preview_image", "Preview an image on the screen",
-            PropertyList({
-                Property("url", kPropertyTypeString)
-            }),
-            [display](const PropertyList& properties) -> ReturnValue {
-                auto url = properties["url"].value<std::string>();
-                auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
-
-                if (!http->Open("GET", url)) {
-                    throw std::runtime_error("Failed to open URL: " + url);
-                }
-                int status_code = http->GetStatusCode();
-                if (status_code != 200) {
-                    throw std::runtime_error("Unexpected status code: " + std::to_string(status_code));
-                }
-
-                size_t content_length = http->GetBodyLength();
-                char* data = (char*)heap_caps_malloc(content_length, MALLOC_CAP_8BIT);
-                if (data == nullptr) {
-                    throw std::runtime_error("Failed to allocate memory for image: " + url);
-                }
-                size_t total_read = 0;
-                while (total_read < content_length) {
-                    int ret = http->Read(data + total_read, content_length - total_read);
-                    if (ret < 0) {
-                        heap_caps_free(data);
-                        throw std::runtime_error("Failed to download image: " + url);
-                    }
-                    if (ret == 0) {
-                        break;
-                    }
-                    total_read += ret;
-                }
-                http->Close();
-
-                auto image = std::make_unique<LvglAllocatedImage>(data, content_length);
-                display->SetPreviewImage(std::move(image));
-                return true;
-            });
-#endif // CONFIG_LV_USE_SNAPSHOT
     }
 #endif // HAVE_LVGL
 
-    // Assets download url (always registered — Settings storage works regardless of partition layout)
-    AddUserOnlyTool("self.assets.set_download_url", "Set the download url for the assets",
-            PropertyList({
-                Property("url", kPropertyTypeString)
-            }),
-            [](const PropertyList& properties) -> ReturnValue {
-                auto url = properties["url"].value<std::string>();
-                Settings settings("assets", true);
-                settings.SetString("download_url", url);
-                return true;
-            });
 }
 
 void McpServer::AddTool(McpTool* tool) {
