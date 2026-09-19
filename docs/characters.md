@@ -93,6 +93,125 @@ the examples short. *Heavily caffeinated* is six numbers and a colour.
 - ⚠️ **What happens mid-sentence.** Switching while he speaks, or mid-glance, should either finish the
   gesture or apply at the next idle. The second is simpler and looks deliberate.
 
+## Motion: one number, not ten
+
+Borrowed wholesale from the design-token work in the sibling project, where the argument is made
+about pixels and holds exactly for time:
+
+> `--r-unit: 0` **squares every corner in the application with one number.**
+> A flat resolved dict cannot express a scale.
+
+`stackchan_head.cc` currently has the anti-pattern that argument is about — ten move durations,
+tuned individually and written into the call sites:
+
+```cpp
+case 1: SetAngles(-30.0f, 10.0f, 200); return 240;
+case 2: SetAngles( 24.0f, 10.0f, 240); return 280;
+...
+SetAngles(think_pan_, 6.0f, 1100);
+SetAngles(0.0f, kListenTilt, 450);
+```
+
+A "calm" character would have to retune all ten, and whoever adds the eleventh gesture will not know
+to. So:
+
+| token | scales | today |
+|---|---|---|
+| `motion_unit` | every move duration **and** every interval — servo `time_ms`, glance hold, blink countdown, gaze drift | `1.0` |
+| `gesture_unit` | every amplitude — glance pan and tilt targets, the thinking look-away, listening tilt | `1.0` |
+
+**Smaller is faster**, because the unit multiplies *time*, exactly as `--r-unit` multiplies radius.
+That is the one naming trap here and it is worth stating in the schema rather than discovering:
+
+```
+caffeinated   motion_unit 0.5   gesture_unit 1.4    quick, and looks further
+default       motion_unit 1.0   gesture_unit 1.0
+five in the morning
+              motion_unit 2.2   gesture_unit 0.4    slow, and barely turns his head
+```
+
+That last one is the test case for whether the tokens are real. "Slow side to side, trying to
+survive" is not a new animation — it is the existing glance behaviour with a long duration and a
+small amplitude. If it needs new code, the tokens are not carrying enough.
+
+### 🔴 The servo floor — this is a hardware difference, not a style one
+
+`motion_unit: 0` on a web page means "no animation". On this robot it means `time_ms = 0`, which the
+servo API documents as *"as fast as it likes"* — a head slamming pan and tilt at full speed into a
+mechanical stop, repeatedly, on a desk.
+
+**Clamp it in the code, not in a comment.** A minimum move duration that no character can go below,
+and a maximum amplitude that no `gesture_unit` can exceed. A character is data from a file or a
+network message; treating it as trusted input is how a theme becomes a way to break a robot.
+
+The tilt limits are already derived from each unit's own factory calibration, which is exactly the
+kind of thing a character must not be able to widen.
+
+### Semantic motion has to survive `motion_unit: 0`
+
+The sibling project's rule, and it transfers directly: *severity must not be carried by colour alone*.
+Here — **greeting must still read differently from startled when motion is off.** If the only
+difference between them is how fast the head moves, then a character that disables motion has
+silently deleted the distinction rather than restyled it.
+
+Today that mostly holds, because gestures differ by target and amplitude rather than only speed. It
+is worth an explicit check the moment a second character exists, because it is the kind of thing that
+is true by accident until it is not.
+
+## Serialising one
+
+The sibling project's token system has no serialisation at all — the CSS cascade *is* the merge, the
+stylesheet *is* the storage, and the only saved value is which theme is selected. There is therefore
+nothing to copy here, and this is the part that is actually new work.
+
+What the cascade gives for free, and a format has to provide deliberately:
+
+| property | what it means here |
+|---|---|
+| **complete base** | every token has a value before any character applies. A character can never produce an undefined one. |
+| **per-key last-wins** | resolution is flat, key by key — *not* a deep merge of nested structures. |
+| **absent ≠ null** | a key a character does not mention inherits. There is no way to say "unset this". |
+
+⚠️ **That last one is where a format goes wrong.** In JSON, `{"motion_unit": null}` and a missing
+`motion_unit` are different things and both are easy to produce by accident. **Prefer a format with no
+null at all** — absent means inherit, and there is no second way to say it.
+
+🔴 **Store units, not resolved values.** The whole point of `motion_unit` is that one number moves ten
+durations. Serialise `{"glance_hold_ms": 1200, "glance_move_ms": 500, …}` and the property is gone:
+a character now overrides ten numbers instead of one, and whoever adds the eleventh gesture will not
+know to. Resolve **at use** (cheapest on an MCU — one multiply in the move call) or **at load** (a
+small resolver expands the scale once). Never at authoring time.
+
+## Proving a character is real
+
+The sibling project's audit is the most transferable idea in its whole token system, and it is worth
+stealing before the first character is written rather than after.
+
+**The instrument is a deliberately hideous character.** Every token swung to a value nothing in the
+real design resembles — a face in colours that clash, a `motion_unit` far off 1, amplitudes at the
+clamp. Apply it, and **anything that does not move is hardcoded.** A subtle test character hides
+exactly the failures it exists to find, which is why the sibling project's is called `test-hideous`
+and never appears in its picker.
+
+Three guards there are worth copying exactly:
+
+1. **Token coverage** — if the test character does not vary a token, that token is untested. Six
+   tokens went unvaried there once and twenty-four correctly-tokenised properties were reported as
+   literals.
+2. **Movement** — if nothing changed at all, the character never applied and the result means nothing.
+3. **Source scan** — a literal and a token look identical in a rendered frame, so grep the source as a
+   backstop.
+
+> 🔴 **And the lesson that cost them the most: the number is only a claim about the states it
+> visited.** Their audit reported 100% while never opening a dialog with a text input — and every form
+> field in the application was rendering a hardcoded white label on white.
+
+**That is sharper here, not softer.** A face is a small state space and therefore easy to believe you
+have covered: 21 named expressions × 4 modes (idle, listening, thinking, speaking), plus blink frames,
+the screensaver, the photo preview and the settings menu. An expression not in the list has
+**unproven** theming. Enumerate the states explicitly and assert the count — which is exactly the
+shape `claims.ini` is for.
+
 ## What tokenising actually involves
 
 Counted from the source, not estimated. Every one of these is already named and grouped in the file
