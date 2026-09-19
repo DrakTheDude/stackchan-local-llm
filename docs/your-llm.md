@@ -124,3 +124,15 @@ those, build a variant with it switched off:
 
 The script explains why a prompt cannot do this, with the measurements. Check tool calling afterwards —
 it edits a chat template, and that is exactly how tool calls quietly stop working.
+
+---
+
+## A word on what you will hear
+
+Getting a model *serving* is this document's job. Getting it to sound right is a separate one, and it
+is not shared between models: what ships here was fitted to `mistral-nemo:12b` by watching it
+misbehave and closing the gaps one at a time. Another model will have its own quirks — a stray token,
+a tic, a habit of reading its own tool results aloud.
+
+That part is yours, and it is the enjoyable half. See
+[If you change the model, the tuning comes with it](model-floor.md#if-you-change-the-model-the-tuning-comes-with-it).

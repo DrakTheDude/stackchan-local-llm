@@ -21,6 +21,10 @@ right — which is why this is a matrix rather than a recommendation.
 ./server/use-model.sh qwen3:8b          # or mistral-nemo:12b
 ```
 
+> These are floors, not verdicts. Everything that shapes how the robot *talks* is fitted to
+> `mistral-nemo:12b`, so changing the model hands you the tuning too — see
+> [If you change the model, the tuning comes with it](#if-you-change-the-model-the-tuning-comes-with-it).
+
 **The 8 GB row needs reasoning off, and there is a one-line way to do it.** With reasoning on,
 `qwen3:8b` sits silent for **4.3 seconds** before speaking on that card, against 0.08 s without — for
 an identical tool score. None of the documented switches work through the OpenAI-compatible endpoint
@@ -262,6 +266,52 @@ Then swap the robot over with one command:
 ```bash
 ./server/use-model.sh <tag>
 ```
+
+## If you change the model, the tuning comes with it
+
+The table above answers *will it work*. It does not answer *will it sound right*, and those are
+different questions with different answers.
+
+**Everything in this repo that shapes how the robot talks was fitted to `mistral-nemo:12b`** — the
+persona, the few-shot examples, the wording of every tool description, and a fair slice of
+[`server/patches/`](../server/patches/). None of it was designed in the abstract. It was written by
+watching one model get things wrong and closing the gap, one behaviour at a time:
+
+| what it did | what it took |
+|---|---|
+| spoke `TOOL_CALLS]` aloud at the start of every tool turn | a regex in the markdown cleaner — it is Mistral's own token, leaking as text |
+| read the camera's notes back word for word | stopping the tool result from *being* a sentence, and giving it a worked example instead |
+| invented `[Image](https://via.placeholder.com/…)` for a photo already on its screen | telling it there is no file and no link, plus two fixes in the TTS path |
+| answered a question about a photograph with fabricated cluster health | still open — see below |
+
+Swap in another model and **you inherit that job**, because the quirks are not shared. A model that
+scores identically on the bench will have its own: a different stray token, a different tic, a
+different way of being too formal or too chatty. None of that shows up in a tool-call score.
+
+This is the fun part, and it is genuinely the part where the robot becomes yours. The three places
+worth knowing:
+
+- **The persona** — `data/.config.yaml`, the `prompt:` block. Voice, length, what it does with numbers.
+- **Tool descriptions** — in the board file, next to each `AddTool`. These matter far more than they
+  look: they are the only instructions the model gets at the moment it decides what to do.
+- **The patch kit** — `server/patches/`. For behaviour no prompt can reach, because it happens in the
+  server rather than in the model.
+
+> 🔑 **The one lesson that transfers between models: a demonstration beats an instruction.** It came
+> up five separate times building this — the wake word, the goodbye, the greeting, the recited tool
+> result, the photo description. Every time, a rule written in the prompt lost to an example that
+> contradicted it, and every time the fix was to change the example rather than to word the rule more
+> firmly. If the model keeps doing something you have explicitly forbidden, stop rewording the
+> prohibition and go find what is demonstrating the opposite.
+
+**What we run, and why it is not the top of the table.** `mistral-nemo:12b`, for variety rather than
+for obedience — it is more entertaining to live with, and a desk robot you enjoy talking to is doing
+its job. It is a 12B, though, and the known cost is the last row above: asked what was in a
+photograph, it once answered with confident, invented fleet health. Charming quirks and wrong numbers
+are not the same thing, and if you point this robot at something where the numbers matter, that is the
+behaviour to watch for and constrain.
+
+---
 
 ## Helping
 
