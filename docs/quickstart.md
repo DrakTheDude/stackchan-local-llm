@@ -10,8 +10,10 @@ connection the downloads dominate and there is nothing anyone can do about that.
 
 - An M5Stack StackChan (CoreS3 / ESP32-S3) and a USB-C cable that carries data
 - A machine with Docker, on the same network as the robot, left running — this is the robot's brain
-- An NVIDIA GPU with 8 GB or more. CPU-only works and is slow enough to change how you feel about
-  the robot; see [the model floor](model-floor.md)
+- A GPU with 8 GB or more. **NVIDIA is the smoothest path** because the model runs in a container
+  with no extra steps; Apple Silicon and AMD both work, running Ollama natively instead — see
+  [standing up your own model](your-llm.md). CPU-only works and is slow enough to change how you
+  feel about the robot; see [the model floor](model-floor.md)
 - 2.4 GHz Wi-Fi. The radio in this robot cannot see a 5 GHz network, so if your router hides both
   behind one name, the robot will look broken while everything else works
 

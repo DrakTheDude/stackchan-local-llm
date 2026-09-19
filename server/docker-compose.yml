@@ -31,6 +31,18 @@ services:
   #    rather than folklore.
   # ---------------------------------------------------------------------------
   ollama:
+    # 🔴 NVIDIA ONLY, AND THAT IS WHY IT IS A PROFILE.
+    #
+    #    The `deploy:` block below asks Docker for an nvidia device. On a Mac,
+    #    or on a Windows box with an AMD card, that is not a slow path - it is
+    #    a hard failure before anything starts, and the stack cannot come up at
+    #    all. Neither machine can pass a GPU into a container anyway.
+    #
+    #    So: on with `COMPOSE_PROFILES=gpu-nvidia` (what .env.example ships),
+    #    off for everyone else, who runs Ollama natively on the host and points
+    #    the config at it. See docs/your-llm.md - the server genuinely does not
+    #    care where the endpoint is.
+    profiles: [gpu-nvidia]
     image: ollama/ollama:latest
     container_name: stackchan-ollama
     restart: unless-stopped
@@ -179,6 +191,12 @@ services:
       context: .
       dockerfile: Dockerfile
     image: stackchan-xiaozhi:english
+    # Reaching an Ollama running on the HOST rather than in a container - the
+    # Mac and AMD path. Docker Desktop provides this name already; on Linux it
+    # has to be asked for, and asking for it on Desktop is harmless.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     container_name: stackchan-xiaozhi
     restart: unless-stopped
     depends_on:

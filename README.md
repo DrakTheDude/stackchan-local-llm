@@ -35,6 +35,7 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 | **[Flash it from your browser](https://drakthedude.github.io/stackchan-local-llm/flash/)** | Chrome or Edge, a USB-C data cable, about two minutes. **Back up the factory firmware first** — the flasher cannot do that for you |
 | **[Quickstart](docs/quickstart.md)** | factory robot → local robot, the whole path including the server. Back up first; that step is not optional |
 | **[What you gain and lose](docs/stock-vs-local.md)** | honestly, against the firmware it shipped with. He will not dance any more |
+| **[Standing up your own model](docs/your-llm.md)** | NVIDIA, Apple Silicon, AMD, or something else entirely — and the one check that tells you whether your GPU is really being used |
 | **[Which model do you need](docs/model-floor.md)** | fifteen models measured on one card: tool calling, time to first spoken word, VRAM. Most of our guesses were wrong |
 | **[Check the privacy claim](docs/privacy.md)** | six checks you can run yourself, and what this does *not* protect you from |
 | **[Roadmap](docs/roadmap.md)** | what is done, what is next, and what is still verified on only one robot |
