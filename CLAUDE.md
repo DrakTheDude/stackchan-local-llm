@@ -87,6 +87,15 @@ Current base: **`66bf9f7`** (v2.4.1, 2026-08-04) — the revision the reference 
 - **The wake-word model is on the assets partition**, and its build rule ignores the SR config. Delete
   `build/generated_assets.bin` and flash assets after changing `CONFIG_SR_WN_*`. Exactly one `SR_WN_*` enabled.
 - **The wake phrase is sent to the model as the first user message.** Choose it for what it says.
+- 🔴 **The camera streams from boot, not from when you ask for a photo.** `VIDIOC_STREAMON` runs at
+  init, so the sensor is filling PSRAM over DMA permanently — 3 MB/s at QVGA. Switching to the VGA
+  mode for the light (its rows are twice as long, so the same exposure collects twice as much) takes
+  that to 9.8 MB/s, the wake-word engine shares the bus, and **voice detection goes spotty within
+  minutes**. It reads as a microphone fault. Fix streaming first, then the picture.
+- 🔴 **Offering a tool-calling model NO tools does not stop it calling one.** Suppressing tools on the
+  wake turn made it invent `get_welcome_message`, write the call as prose, and the robot read the JSON
+  aloud. Upstream's `DIRECT_ANSWER_TOOL` exists for exactly this — it turns "call a tool or not" into
+  "which tool". Give the model one legitimate thing to reach for rather than nothing.
 - 🔴 **Reasoning is the biggest latency term in the stack, and the usual way to switch it off does not
   work.** `/no_think` in a prompt does nothing here — in the system prompt it makes the model think
   *more* — and `think: false` on an OpenAI-compatible endpoint is accepted and ignored. Only Ollama's

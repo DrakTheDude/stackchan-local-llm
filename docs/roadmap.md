@@ -22,7 +22,9 @@ OTA URL and the *contents* of the assets partition, and published with a
 calibration. And the model floor is measured: fifteen models, tool calling, speed and VRAM, in
 [model-floor.md](model-floor.md).
 
-**What is left is other people's hardware.** Every number here comes from one robot and one GPU.
+**What is left is other people's hardware.** Every hardware claim comes from one robot; the model
+numbers now come from two GPUs, which was enough for them to disagree and for that to be the most
+useful thing they said.
 
 ⚠️ **All of it is verified on exactly one robot.** Every hardware claim here — the I²C map, the servo
 rail, the camera's behaviour, the audio quirks — comes from a single unit. A report from a second one is
@@ -82,8 +84,21 @@ English-first board support, with every hardware assumption written down next to
   connection error, and the setup network is `StackChan-XXXX` rather than upstream's `Xiaozhi-XXXX`.
   **Both shipped**: prebuilt binaries and the browser flasher are live, and this is what made one
   binary serve everybody.
+- ✅ **Local vision, optional.** A vision model on the owner's own machine describes what the camera
+  photographs; with none configured the photo stays on the device exactly as before, and the firmware
+  needs no switch for it — the server offers a vision URL only when it has a model. `qwen2.5vl:3b` is
+  4.1 GB and ~0.35 s per frame, and sits alongside the chat model rather than swapping with it. See
+  [vision.md](vision.md), and [privacy.md](privacy.md) for the check that replaced "GetCamera()
+  returns nullptr".
+- ⬜ 🔴 **Stream the camera only while taking a photo.** `VIDIOC_STREAMON` runs at init, so the sensor
+  streams continuously from boot — 3 MB/s of PSRAM DMA, permanently, for a camera used seconds a day.
+  It also blocks the fix for the picture quality: the 640×480 mode doubles the row time and therefore
+  the light, but at VGA that continuous load becomes 9.8 MB/s, the wake-word engine shares the bus and
+  detection goes spotty. Per-photo streaming fixes both. `HalveUyvy()` is already in the tree for the
+  2×2 average back down to the panel.
 - ⬜ Behaviour, documented: face and expressions, head motion and the thinking pose, LED ring states,
-  camera (on-screen only), wake word ("Hi, Stack Chan" — runs on the robot, not the server)
+  camera (on-screen, plus a description when a vision model is configured), wake word ("Hi, Stack
+  Chan" — runs on the robot, not the server)
 - ⬜ **Hardware assumptions, each with a way to verify it:** I²C device map, servo rail at `0x6F`, servo
   IDs and per-unit calibration, LED chain order, camera sensor. Verified on one unit so far — say so.
 - ⬜ Board variants: a diagnostic mode that prints the I²C scan and rail / servo / codec checks, so a report

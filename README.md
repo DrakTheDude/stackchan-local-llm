@@ -25,7 +25,7 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 | **Runs on the card you have** | fifteen models measured for tool calling, speed and VRAM, from 5 GB up. [What to run on yours](docs/model-floor.md) |
 | **Has a face** | drawn rather than played back: it blinks, holds your gaze, squints, reacts while he thinks and speaks, and the head moves with him |
 | **Uses tools** | [MCP](https://modelcontextprotocol.io) is the contract. Point him at Home Assistant or anything else with an MCP server, and an ambient status can drive his LED ring and idle screen |
-| **Takes photos** | metered and tone-mapped on the device, shown on his own screen. There is no cloud vision path, by construction |
+| **Takes photos, and can describe them** | metered and tone-mapped on the device and shown on his own screen. Give him a [vision model on your own card](docs/vision.md) and he says what he saw; give him none and the photo simply stays on the device. There is no cloud vision path either way |
 | **Can be switched off** | microphone and camera have real switches in the settings menu. The mute closes the input device — the wake word stops too — and survives a reboot |
 
 ## Start here
@@ -37,6 +37,7 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 | **[What you gain and lose](docs/stock-vs-local.md)** | honestly, against the firmware it shipped with. He will not dance any more |
 | **[Standing up your own model](docs/your-llm.md)** | NVIDIA, Apple Silicon, AMD, or something else entirely — and the one check that tells you whether your GPU is really being used |
 | **[Which model do you need](docs/model-floor.md)** | fifteen models measured on one card: tool calling, time to first spoken word, VRAM. Most of our guesses were wrong |
+| **[Letting him see](docs/vision.md)** | a vision model on your own card, about 4 GB and a third of a second per photo — and what it costs you in the privacy checks |
 | **[Check the privacy claim](docs/privacy.md)** | six checks you can run yourself, and what this does *not* protect you from |
 | **[Roadmap](docs/roadmap.md)** | what is done, what is next, and what is still verified on only one robot |
 

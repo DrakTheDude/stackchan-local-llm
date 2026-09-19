@@ -64,8 +64,12 @@ Then:
 
 ```bash
 docker compose up -d          # first run pulls ~4 GB
-./use-model.sh qwen3:14b      # pulls the model, points the config at it, restarts
+./use-model.sh mistral-nemo:12b   # pulls it, points the config at it, restarts
 ```
+
+That model is the recommendation for a card of 12 GB or more. On 8 GB use
+`./no-think.sh qwen3:8b` and then `./use-model.sh qwen3:8b-nothink` instead — the matrix and the
+measurements behind it are in [the model floor](model-floor.md).
 
 Check it came up:
 

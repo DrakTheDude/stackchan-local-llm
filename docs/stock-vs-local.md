@@ -57,7 +57,7 @@ the microphone audio went.
 | **RGB strip** | kept as an ambient status ring rather than an effects demo |
 | **Hardware test** | kept, and promoted: it runs at **every boot** and the chime is its result. The success sound means the speaker, microphone and servo rail were all confirmed. A different sound means something did not come up |
 | **Change Wi-Fi** | kept, and it also carries the server address — hold the screen for five seconds |
-| **Camera** | photos display on the robot's own screen and go nowhere. There is no cloud vision path, by construction |
+| **Camera** | photos display on the robot's own screen. With a [local vision model](vision.md) he also describes them; without one they go nowhere at all. The cloud vision path is unregistered either way |
 | **Timezone, Device** | moved server-side, where the clock already lives |
 
 ### And things the stock firmware has no equivalent for
