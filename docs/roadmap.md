@@ -59,6 +59,11 @@ English-first board support, with every hardware assumption written down next to
 - ✅ **Privacy switches.** The microphone switch closes the input device, so the wake word stops too; the
   camera switch refuses at the point of capture. Both persist across a reboot and the mute shows on
   screen, because a mute you cannot see is one you will forget.
+- ⬜ **The mouth stops moving after a photo is shown.** Reported 2026-09-19. The face animates again
+  for everything else, so the speaking mouth specifically stops tracking. First suspect is the guard
+  in `StackyFace::Tick()` that skips animating while the face is behind an opaque overlay — the
+  screensaver uses it, and the photo preview may leave it set. Worth checking `saver_ticks_` and the
+  preview's teardown path before anything else.
 - ⬜ **Diagnose the boot-time I²C glitch, rather than only surviving it.** About ten seconds into every
   boot, as Wi-Fi associates and the wake-word engine starts, the shared bus NAKs for a few hundred
   milliseconds. Both chips on it go unreachable, and two separate faults came out of that one window: a

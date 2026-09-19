@@ -18,6 +18,7 @@
 
 #include <esp_log.h>
 #include <esp_heap_caps.h>
+#include <mbedtls/base64.h>   // screendump only
 #include <cmath>
 #include <cstring>
 #include <driver/gpio.h>
@@ -1117,7 +1118,72 @@ private:
         ESP_LOGI(TAG, "camera: no VSYNC seen, sensor idle (cold boot)");
     }
 
-     void InitializeCamera() {
+     // 📸 DEV-ONLY SCREEN CAPTURE, over the serial cable and nowhere else.
+    //
+    //    self.screen.snapshot did this and was removed: it took a URL from the
+    //    caller and uploaded to it, which on a device driven by a microphone
+    //    with no confirmation step is exfiltration waiting for a misheard
+    //    sentence. The CAPABILITY was never the problem - SnapshotToJpeg is
+    //    still there - the caller-supplied destination was.
+    //
+    //    So the frame goes to the serial console, to a cable somebody is
+    //    physically holding. No network, no URL, no tool, no arguments.
+    //
+    // ⚠️ OFF, and it belongs off. Every interval this allocates a 150KB draw
+    //    buffer and JPEG-encodes it. Turn it on to look at the interface for an
+    //    afternoon, then turn it off.
+    //
+    //    deploy/capture-screen.ps1 collects the frames and writes .jpg files.
+    static constexpr bool kDumpScreenToSerial = false;
+    static constexpr int kDumpIntervalMs = 6000;
+
+    void StartScreenDumpTask() {
+        if (!kDumpScreenToSerial) {
+            return;
+        }
+        // Its own task: SnapshotToJpeg takes the display lock itself, so this
+        // must not be called from anything already holding it - and it needs a
+        // real stack, which rules out the esp_timer task (3584 bytes).
+        xTaskCreate(
+            [](void* arg) {
+                auto* self = static_cast<M5StackStackChanBoard*>(arg);
+                vTaskDelay(pdMS_TO_TICKS(10000));   // let the UI settle first
+                for (;;) {
+                    std::string jpeg;
+                    // The board's own member, not GetDisplay(): SnapshotToJpeg
+                    // lives on LcdDisplay, and the base Display has no idea.
+                    auto* display = self->display_;
+                    if (display != nullptr && display->SnapshotToJpeg(jpeg, 80) &&
+                        !jpeg.empty()) {
+                        printf("\nSCREENDUMP BEGIN %u\n",
+                               static_cast<unsigned>(jpeg.size()));
+                        // 57 raw bytes -> 76 base64 chars, a comfortable line.
+                        constexpr size_t kRaw = 57;
+                        unsigned char line[128];
+                        for (size_t off = 0; off < jpeg.size(); off += kRaw) {
+                            const size_t n = std::min(kRaw, jpeg.size() - off);
+                            size_t out_len = 0;
+                            if (mbedtls_base64_encode(
+                                    line, sizeof(line), &out_len,
+                                    reinterpret_cast<const unsigned char*>(jpeg.data() + off),
+                                    n) == 0) {
+                                line[out_len] = '\0';
+                                printf("SD:%s\n", reinterpret_cast<char*>(line));
+                            }
+                        }
+                        printf("SCREENDUMP END\n");
+                    } else {
+                        ESP_LOGW(TAG, "screendump: snapshot failed");
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(kDumpIntervalMs));
+                }
+            },
+            "screendump", 6144, this, 1, nullptr);
+        ESP_LOGW(TAG, "screendump: ON - frames go to the serial console every %d ms",
+                 kDumpIntervalMs);
+    }
+
+    void InitializeCamera() {
         WaitForVsyncGap();
 
         camera_config_t cam = {};
@@ -1550,6 +1616,7 @@ public:
         InitializeIli9342Display();
         InitializeTheme();
         InitializeCamera();
+        StartScreenDumpTask();
         InitializeFt6336TouchPad();
         GetBacklight()->RestoreBrightness();
 

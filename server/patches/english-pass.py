@@ -33,6 +33,30 @@ ROOT = Path("/opt/xiaozhi-esp32-server")
 
 # (file, old, new). Exact, anchored strings - no regex, nothing clever.
 REPLACEMENTS = [
+    # 🎭 NO RAW FUNCTION NAME ON HIS FACE.
+    #
+    #    Upstream shows "% self_camera_show_photo" on the device while a tool
+    #    runs. Fine as a debug affordance on a dev board; wrong on a robot with
+    #    a face, where it is an internal identifier nobody has seen, in the same
+    #    place as the conversation - so the character drops the moment he uses a
+    #    tool.
+    #
+    #    Found by capturing the screen, not by watching it. It is on screen for
+    #    about a second and reads as a glitch rather than as information.
+    #
+    # ⚠️ Nothing replaces it. The face already has a thinking mode and the head
+    #    moves while he works; a robot has better ways to say "hold on" than
+    #    printing a percent sign and a function name.
+    (
+        "core/providers/tools/unified_tool_handler.py",
+        """            # 发送工具调用显示消息到设备
+            try:
+                await send_display_message(self.conn, f"% {function_name}")
+            except Exception as e:
+                self.logger.warning(f"发送工具调用显示消息失败: {e}")""",
+        """            # The device is a robot with a face - see the note in the patch kit.
+            # Upstream printed "% <function_name>" here; the face says it better.""",
+    ),
     # 👁 THE VISION PROVIDER, which appends this to EVERY question it asks about
     #    a photo - unconditionally, in code, below any config anyone can reach.
     #

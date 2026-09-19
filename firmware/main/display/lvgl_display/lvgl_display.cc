@@ -339,12 +339,13 @@ bool LvglDisplay::SnapshotToJpeg(std::string& jpeg_data, int quality) {
         return false;
     }
 
-    // swap bytes
-    uint16_t* data = (uint16_t*)draw_buffer->data;
-    size_t pixel_count = draw_buffer->data_size / 2;
-    for (size_t i = 0; i < pixel_count; i++) {
-        data[i] = __builtin_bswap16(data[i]);
-    }
+    // 🔴 NO BYTE SWAP. Upstream swaps here, and on this board that produces a
+    //    capture with pale green sclera and brown pupils from a face that is
+    //    white and near-black on the actual panel - which is ground truth we
+    //    could see, unlike the camera, where the same class of bug cost days.
+    //
+    //    The panel and the JPEG encoder agree about byte order on this build;
+    //    the swap introduces the disagreement rather than correcting it.
 
     // Clear output string and use callback version to avoid pre-allocating large memory blocks
     jpeg_data.clear();

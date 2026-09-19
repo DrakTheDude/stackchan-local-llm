@@ -39,3 +39,4 @@ __pycache__/
 # issue, not something to commit.
 deploy/check-deps.log
 deploy/check-deps-error.txt
+screens/
