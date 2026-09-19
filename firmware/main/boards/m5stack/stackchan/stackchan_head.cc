@@ -1,4 +1,5 @@
 #include "stackchan_head.h"
+#include "character.h"
 
 #include "application.h"
 #include "mcp_server.h"
@@ -209,9 +210,9 @@ int StackChanHead::MotionStep() {
         const int stage = startle_stage_;
         startle_stage_ = stage + 1;
         switch (stage) {
-            case 1: SetAngles(-30.0f, 10.0f, 200); return 240;
-            case 2: SetAngles( 24.0f, 10.0f, 240); return 280;
-            case 3: SetAngles(  0.0f,  6.0f, 300); return 340;
+            case 1: SetAngles(character::PanDeg(-30.0f), character::TiltDeg(10.0f), character::MoveMs(200)); return character::IntervalMs(240);
+            case 2: SetAngles(character::PanDeg(24.0f), character::TiltDeg(10.0f), character::MoveMs(240)); return character::IntervalMs(280);
+            case 3: SetAngles(character::PanDeg(0.0f), character::TiltDeg(6.0f), character::MoveMs(300)); return character::IntervalMs(340);
             default: startle_stage_ = 0; return kPollMs;
         }
     }
@@ -251,20 +252,22 @@ int StackChanHead::MotionStep() {
         switch (stage) {
             case 0:
                 // The breath. Chin down, slowly.
-                SetAngles(0.0f, -7.0f, 700);
+                SetAngles(character::PanDeg(0.0f), character::TiltDeg(-7.0f), character::MoveMs(700));
                 return 900;
             case 1:
                 // And away, up and to one side. Direction picked once, so the
                 // drifts that follow stay on the same side of the room.
                 think_pan_ = (esp_random() % 2) ? -14.0f : 12.0f;
-                SetAngles(think_pan_, 6.0f, 1100);
+                SetAngles(character::PanDeg(think_pan_), character::TiltDeg(6.0f),
+                          character::MoveMs(1100));
                 return 1400;
             default: {
                 // Small drifts around the held pose. Wide enough to read from
                 // across the desk, slow enough not to look nervous.
                 const float dp = think_pan_ + (static_cast<int>(esp_random() % 9) - 4);
                 const float dt = 6.0f + (static_cast<int>(esp_random() % 5) - 2);
-                SetAngles(dp, dt, 900);
+                SetAngles(character::PanDeg(dp), character::TiltDeg(dt),
+                          character::MoveMs(900));
                 return 1600 + static_cast<int>(esp_random() % 1400);
             }
         }
@@ -274,7 +277,7 @@ int StackChanHead::MotionStep() {
         // word does not arrive with his head still parked off to one side.
         think_stage_ = -1;
         last_state_ = -1;
-        SetAngles(0.0f, 0.0f, 350);
+        SetAngles(character::PanDeg(0.0f), character::TiltDeg(0.0f), character::MoveMs(350));
         return 380;
     }
 
@@ -289,7 +292,7 @@ int StackChanHead::MotionStep() {
             last_state_ = state;
             // Start the reply facing forward, then glance shortly after.
             next_glance_us_ = now + 700 * 1000;
-            SetAngles(0.0f, 0.0f, 400);
+            SetAngles(character::PanDeg(0.0f), character::TiltDeg(0.0f), character::MoveMs(400));
             return kPollMs;
         }
         if (now >= next_glance_us_) {
@@ -301,11 +304,14 @@ int StackChanHead::MotionStep() {
             }
             step_ = pick;
 
-            const int move_ms =
-                kGlanceMoveMinMs + static_cast<int>(esp_random() % kGlanceMoveJitterMs);
-            const int hold_ms =
-                kGlanceHoldMinMs + static_cast<int>(esp_random() % kGlanceHoldJitterMs);
-            SetAngles(kGlancePan[pick], kGlanceTilt[esp_random() % kGlanceTiltCount],
+            // Through the character: a calm one looks more slowly AND rests
+            // longer between looks, from one number.
+            const int move_ms = character::MoveMs(
+                kGlanceMoveMinMs + static_cast<int>(esp_random() % kGlanceMoveJitterMs));
+            const int hold_ms = character::IntervalMs(
+                kGlanceHoldMinMs + static_cast<int>(esp_random() % kGlanceHoldJitterMs));
+            SetAngles(character::PanDeg(kGlancePan[pick]),
+                      character::TiltDeg(kGlanceTilt[esp_random() % kGlanceTiltCount]),
                       static_cast<uint16_t>(move_ms));
             next_glance_us_ = now + static_cast<int64_t>(move_ms + hold_ms) * 1000;
         }
@@ -318,9 +324,10 @@ int StackChanHead::MotionStep() {
     if (state != last_state_) {
         last_state_ = state;
         if (state == kDeviceStateListening) {
-            SetAngles(0.0f, kListenTilt, 450);
+            SetAngles(character::PanDeg(0.0f), character::TiltDeg(kListenTilt),
+                      character::MoveMs(450));
         } else {
-            SetAngles(0.0f, 0.0f, 600);
+            SetAngles(character::PanDeg(0.0f), character::TiltDeg(0.0f), character::MoveMs(600));
         }
     }
     return kPollMs;
@@ -343,14 +350,17 @@ void StackChanHead::RegisterMcpTools() {
         PropertyList({
             Property("pan",         kPropertyTypeInteger, 0, -kPanLimitDeg,  kPanLimitDeg),
             Property("tilt",        kPropertyTypeInteger, 0, -kTiltLimitDeg, kTiltLimitDeg),
-            Property("duration_ms", kPropertyTypeInteger, 400, 0, 5000),
+            Property("duration_ms", kPropertyTypeInteger, 400, character::kMinMoveMs, 5000),
         }),
         [this](const PropertyList& p) -> ReturnValue {
             int pan  = p["pan"].value<int>();
             int tilt = p["tilt"].value<int>();
             int dur  = p["duration_ms"].value<int>();
+            // Angles as asked - an explicit command is not a character trait -
+            // but the duration is clamped, because this tool accepted zero and
+            // zero means "as fast as the servo likes".
             if (!SetAngles(static_cast<float>(pan), static_cast<float>(tilt),
-                           static_cast<uint16_t>(dur))) {
+                           character::ClampMoveMs(dur))) {
                 return std::string("head unavailable: servo bus did not initialise");
             }
             // Hold off the speaking sway, or this move is undone within 300ms.
