@@ -43,8 +43,26 @@ def card_for(v, fits):
     return "24 GB"
 
 
+# Which machine's table to build. Defaults to the 4090 results that the
+# published page is about; pass a directory name to build another one.
+#
+# ⚠️ NEVER GLOB ACROSS MACHINES. Two cards in one table, sorted together and
+#    presented under one heading, is a lie that reads perfectly.
+import sys as _sys
+
+machine = _sys.argv[1] if len(_sys.argv) > 1 else "rtx-4090-24gb-ollama-defaults"
+src = OUT / "results" / machine
+if not src.is_dir():
+    legacy = sorted(OUT.glob("result-*.json"))
+    if legacy:
+        src = OUT          # pre-split layout
+    else:
+        print(f"no results in {src}", file=_sys.stderr)
+        _sys.exit(1)
+print(f"building from {src}")
+
 rows, notes = [], []
-for f in sorted(OUT.glob("result-*.json")):
+for f in sorted(src.glob("result-*.json")):
     d = json.load(open(f))
     if "llama.cpp" in str(d.get("hardware") or ""):
         continue

@@ -8,30 +8,51 @@
 
 ## The short answer
 
-| your card | run this | why |
-|---|---|---|
-| **8 GB** | `granite4:micro` | 5.0 GB, 83% on tools. The only capable thing that leaves room for a desktop |
-| **12 GB** | `qwen3:8b` | 10.0 GB and **100%** — the smallest model here that never missed a tool call |
-| **16 GB and up** | **`mistral-nemo:12b`** | 12.4 GB, **100%**, and it starts speaking in **0.09 s** |
-| **24 GB** | `gpt-oss:20b` | 12.9 GB, 100%, 154 tok/s, and ~10 GB left over for a vision model later |
+Measured on two cards: an RTX 4090 (24 GB) and an RTX 5060 Mobile (8 GB). They disagree, and both are
+right — which is why this is a matrix rather than a recommendation.
 
-**If you change one thing, make it this one.** `mistral-nemo:12b` is the recommendation: perfect tool
-score, the fastest first word measured, and no reasoning to fight with.
+| your card | chat model | why | with an eye too |
+|---|---|---|---|
+| **8–12 GB** | **`qwen3:8b`**, reasoning **off** | 100% on all 21 cases, fits in 5.6 GB, speaks in 0.08 s | `+ moondream:1.8b` (1.2 GB) at 8 GB; `+ qwen2.5vl:3b` (4.1 GB) once you have 12 |
+| **12–20 GB** | **`mistral-nemo:12b`** | 100%, speaks in 0.09 s, and does not reason at all so there is nothing to switch off | `+ qwen2.5vl:3b` → 16.5 GB total |
+| **20 GB and up** | **`mistral-nemo:12b`** still | the extra card buys vision and headroom, not a better talker | `+ qwen2.5vl:3b`, comfortably |
 
 ```bash
-./server/use-model.sh mistral-nemo:12b
+./server/use-model.sh qwen3:8b          # or mistral-nemo:12b
 ```
 
-It is also the one that won a listening test against `gpt-oss:20b`, which matches it on every number in
-the table and fits the same card. Both were tried on the real robot, warm, with the same prompt. The
-verdict on gpt-oss was that it *"felt hesitant to talk to me"* — and that is the 0.34 s it spends
-reasoning before its first word, against nemo's 0.09 s. A third of a second does not look like much
-written down; it sits exactly where a person expects an answer.
+**The 8 GB row carries a warning.** `qwen3:8b` is only usable there with reasoning **off**: with it on
+the robot sits silent for **4.3 seconds** before speaking, against 0.08 s without. And the server
+cannot currently turn it off — see [Reasoning costs you the conversation](#reasoning-costs-you-the-conversation).
+Until that is fixed, an 8 GB card gets `granite4:tiny-h` instead: 90%, 4.4 GB, and it never reasons.
 
-⚠️ **The trade is real, though.** On ten greetings, `gpt-oss:20b` never reached for a tool and nemo
-reached once. One in ten sounds small until you say hello to a robot a dozen times a day. If your robot
-has many tools and you greet it often, gpt-oss is the safer pick and you will wait a third of a second
-for it.
+**Do not put `mistral-nemo:12b` on 8 GB.** It is the best model here on a big card and it needs 6.1 GB
+of weights plus its context; Ollama fits 78% of it and runs the rest on the CPU. The result is **17.6
+tok/s against 101** on a 24 GB card — the same model, six times slower, with nothing in the logs
+saying so.
+
+### The two cards, same models
+
+| | RTX 4090, 24 GB | RTX 5060 Mobile, 8 GB |
+|---|---|---|
+| `qwen3:8b` *no-think* | 100%, 132 tok/s, 10.0 GB | 100%, 27 tok/s, 5.6 GB |
+| `mistral-nemo:12b` | 100%, 101 tok/s, 12.4 GB | 86%, **17.6 tok/s**, ⚠️ 78% fit |
+| `granite4:tiny-h` | 83%, 122 tok/s, 4.7 GB | 90%, 84 tok/s, 4.4 GB |
+| `granite4:micro` | 83%, 209 tok/s, 5.0 GB | 71%, 84 tok/s, 2.5 GB |
+| `qwen3:4b` *no-think* | 78%, 212 tok/s, 7.5 GB | 81%, 50 tok/s, 3.2 GB |
+
+Three things only a second card could show:
+
+**VRAM is not a property of the model.** `granite4:micro` took 5.0 GB on the 4090 and 2.5 GB on the
+5060 — Ollama sizes its context to the card it finds. So a "needs X GB" figure measured on a big card
+*overstates* what a small one needs, which is the friendlier direction to be wrong in but still wrong.
+
+**Reasoning costs more on slower hardware, disproportionately.** `qwen3:8b` waits 2.24 s before
+speaking on the 4090 and 4.26 s on the 5060. The models most suited to modest cards are exactly the
+ones where reasoning hurts most.
+
+**A mobile card is not a desktop card with fewer gigabytes.** The 5060 ran a 3B at 84 tok/s against the
+4090's 209 — 40%, roughly the memory-bandwidth ratio. Everything scales down together.
 
 ## The greeting is the test nobody writes
 

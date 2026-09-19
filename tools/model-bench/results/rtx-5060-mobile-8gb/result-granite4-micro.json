@@ -1,0 +1,72 @@
+{
+  "model": "granite4:micro",
+  "hardware": "RTX 5060 Mobile 8GB",
+  "base_url": "http://192.168.1.171:11434/v1",
+  "temperature": 0.75,
+  "thinking": "on (model default)",
+  "cold_load_s": 3.0,
+  "ttft_s": 0.07,
+  "time_to_first_spoken_word_s": 0.07,
+  "silence_s": 0.0,
+  "max_tokens": 1200,
+  "tool_score": "15/21",
+  "tool_pct": 71,
+  "tools_supported": true,
+  "median_latency_s": 0.23,
+  "median_tok_s": 84.1,
+  "resident_gb": 2.5,
+  "vram_gb": 2.5,
+  "on_gpu_pct": 100,
+  "cases": [
+    {
+      "case": "direct",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "indirect",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "two-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "no-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-check",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-not-call",
+      "passes": 0,
+      "of": 3,
+      "notes": [
+        "called self_get_device_status when it should have answered",
+        "called self_get_device_status when it should have answered",
+        "called self_get_device_status when it should have answered"
+      ]
+    },
+    {
+      "case": "greeting",
+      "passes": 0,
+      "of": 3,
+      "notes": [
+        "called self_get_device_status when it should have answered",
+        "called self_get_device_status when it should have answered",
+        "called self_get_device_status when it should have answered"
+      ]
+    }
+  ]
+}

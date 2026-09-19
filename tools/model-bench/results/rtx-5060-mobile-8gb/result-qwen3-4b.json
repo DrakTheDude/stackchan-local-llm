@@ -1,0 +1,72 @@
+{
+  "model": "qwen3:4b",
+  "hardware": "RTX 5060 Mobile 8GB",
+  "base_url": "http://192.168.1.171:11434/v1",
+  "temperature": 0.75,
+  "thinking": "on (model default)",
+  "cold_load_s": 8.6,
+  "ttft_s": 0.09,
+  "time_to_first_spoken_word_s": 4.4,
+  "silence_s": 4.32,
+  "max_tokens": 1200,
+  "tool_score": "15/21",
+  "tool_pct": 71,
+  "tools_supported": true,
+  "median_latency_s": 6.07,
+  "median_tok_s": 49.9,
+  "resident_gb": 3.2,
+  "vram_gb": 3.2,
+  "on_gpu_pct": 100,
+  "cases": [
+    {
+      "case": "direct",
+      "passes": 0,
+      "of": 3,
+      "notes": [
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure"
+      ]
+    },
+    {
+      "case": "indirect",
+      "passes": 0,
+      "of": 3,
+      "notes": [
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure",
+        "ran out of max_tokens before it said anything - raise --max-tokens, this is not a tool-calling failure"
+      ]
+    },
+    {
+      "case": "two-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "no-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-check",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-not-call",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "greeting",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    }
+  ]
+}

@@ -21,6 +21,16 @@ cd "$(dirname "$0")"
 OLLAMA="${OLLAMA:-http://127.0.0.1:11434}"
 LABEL="${1:-$(hostname)}"
 
+# 🔴 ONE DIRECTORY PER MACHINE. Results used to be named result-<model>.json
+#    with the hardware recorded only inside, so a second machine overwrote the
+#    first and the table silently mixed two cards. A 3B model "measuring"
+#    2.5 GB where it had measured 5.0 GB an hour before is both a real
+#    difference between cards AND what a clobbered file looks like - which is
+#    the problem: nothing about it looks wrong.
+RESULTS="results/$(echo "$LABEL" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-')"
+mkdir -p "$RESULTS"
+echo "results -> $RESULTS"
+
 if ! curl -sf "$OLLAMA/api/tags" >/dev/null; then
     echo "No Ollama at $OLLAMA - start it, or set OLLAMA=..." >&2
     exit 1
@@ -42,12 +52,12 @@ for m in "${MODELS[@]}"; do
     echo "==================== $m"
     python3 bench.py --base-url "$OLLAMA/v1" --ollama-host "$OLLAMA" \
         --model "$m" --label "$LABEL" --repeats 3 --timeout 300 \
-        --out "result-$slug.json"
+        --out "$RESULTS/result-$slug.json"
 
     silence=$(python3 -c "
 import json
 try:
-    print(json.load(open('result-$slug.json')).get('silence_s') or 0)
+    print(json.load(open('$RESULTS/result-$slug.json')).get('silence_s') or 0)
 except Exception:
     print(0)
 ")
@@ -55,7 +65,7 @@ except Exception:
         echo "  -- it thinks for ${silence}s before speaking; measuring it without"
         python3 bench.py --base-url "$OLLAMA/v1" --ollama-host "$OLLAMA" \
             --model "$m" --label "$LABEL" --repeats 3 --timeout 300 --no-think \
-            --out "result-$slug-nothink.json"
+            --out "$RESULTS/result-$slug-nothink.json"
     fi
 
     unload "$m"

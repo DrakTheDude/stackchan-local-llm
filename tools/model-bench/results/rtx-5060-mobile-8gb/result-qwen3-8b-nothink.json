@@ -1,0 +1,64 @@
+{
+  "model": "qwen3:8b",
+  "hardware": "RTX 5060 Mobile 8GB",
+  "base_url": "http://192.168.1.171:11434/v1",
+  "temperature": 0.75,
+  "thinking": "off (verified)",
+  "cold_load_s": 0.3,
+  "ttft_s": 0.08,
+  "time_to_first_spoken_word_s": 0.08,
+  "silence_s": 0.0,
+  "max_tokens": 1200,
+  "tool_score": "21/21",
+  "tool_pct": 100,
+  "tools_supported": true,
+  "median_latency_s": 0.85,
+  "median_tok_s": 27.1,
+  "resident_gb": 5.6,
+  "vram_gb": 5.6,
+  "on_gpu_pct": 100,
+  "cases": [
+    {
+      "case": "direct",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "indirect",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "two-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "no-args",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-check",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "must-not-call",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    },
+    {
+      "case": "greeting",
+      "passes": 3,
+      "of": 3,
+      "notes": []
+    }
+  ]
+}
