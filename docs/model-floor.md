@@ -21,10 +21,19 @@ right — which is why this is a matrix rather than a recommendation.
 ./server/use-model.sh qwen3:8b          # or mistral-nemo:12b
 ```
 
-**The 8 GB row carries a warning.** `qwen3:8b` is only usable there with reasoning **off**: with it on
-the robot sits silent for **4.3 seconds** before speaking, against 0.08 s without. And the server
-cannot currently turn it off — see [Reasoning costs you the conversation](#reasoning-costs-you-the-conversation).
-Until that is fixed, an 8 GB card gets `granite4:tiny-h` instead: 90%, 4.4 GB, and it never reasons.
+**The 8 GB row needs reasoning off, and there is a one-line way to do it.** With reasoning on,
+`qwen3:8b` sits silent for **4.3 seconds** before speaking on that card, against 0.08 s without — for
+an identical tool score. None of the documented switches work through the OpenAI-compatible endpoint
+the server speaks, so build a variant with it pinned off:
+
+```bash
+./server/no-think.sh qwen3:8b     # creates qwen3:8b-nothink
+./server/use-model.sh qwen3:8b-nothink
+```
+
+Verified rather than assumed: the pinned variant scores **21/21, speaks in 0.07 s and runs at 130
+tok/s** — identical tool behaviour, none of the wait. Editing a chat template is exactly how tool
+calling quietly breaks, so re-run the bench after building one.
 
 **Do not put `mistral-nemo:12b` on 8 GB.** It is the best model here on a big card and it needs 6.1 GB
 of weights plus its context; Ollama fits 78% of it and runs the rest on the CPU. The result is **17.6
@@ -216,8 +225,14 @@ provider prepends `/no_think` to the user's message for any model named `qwen3*`
 OpenAI-compatible endpoint. So today, on the shipped default, the robot is thinking while the software
 believes it is not — and the instruction is also visible to the model as part of what you said.
 
-That is why the recommendation above is a model that does not reason at all rather than a Qwen with
-reasoning "disabled". Making that switch real is a server patch, not a config change.
+That is why the recommendation above prefers a model that does not reason at all — and why, when you
+do want a Qwen, the switch has to be pinned into the model rather than asked for.
+
+**The reason every prompt trick fails is in the chat template.** Its no-think branch is gated on
+`$.Think`, a variable only Ollama's native API sets, so no wording in any message can reach it. But a
+template is just text, and a derived model can pin that branch permanently — which is what
+[`server/no-think.sh`](../server/no-think.sh) does. It needs no patch to the server and nothing kept in
+step with upstream, and it works for any caller in any dialect.
 
 ## A model can also be refused rather than bad
 

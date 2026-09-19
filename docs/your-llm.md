@@ -110,3 +110,17 @@ stay in step. It works against a native Ollama as well as the bundled one.
 
 Which model to pick is [the model floor](model-floor.md), which is measured on two cards rather than
 guessed.
+
+## If your model reasons before answering
+
+Qwen3 and similar think first, and on modest hardware that is the biggest delay you will feel — 4.3
+seconds of silence on an 8 GB card before the first word, for the same answer. If you picked one of
+those, build a variant with it switched off:
+
+```bash
+./server/no-think.sh qwen3:8b
+./server/use-model.sh qwen3:8b-nothink
+```
+
+The script explains why a prompt cannot do this, with the measurements. Check tool calling afterwards —
+it edits a chat template, and that is exactly how tool calls quietly stop working.

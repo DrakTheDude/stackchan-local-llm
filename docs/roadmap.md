@@ -130,11 +130,15 @@ Wake word → STT → model → TTS, with every backend a setting rather than a 
 - ⬜ **The same numbers on a second GPU.** [`tools/model-bench/sweep.sh`](../tools/model-bench/sweep.sh)
   is one command against any Ollama; results from a smaller card are the most useful contribution to
   this page.
-- ⬜ 🔴 **Make `think: false` real in the server.** Its Ollama provider prepends `/no_think` to the
-  user's message for any `qwen3*` model and calls the OpenAI-compatible endpoint — measured, neither
-  does anything, and the instruction is visible to the model as part of what the user said. Only
-  Ollama's own `/api/chat` honours it. Until that is patched the recommended default is a model that
-  does not reason at all.
+- ✅ **Reasoning can be switched off, without patching the server.** Its Ollama provider prepends
+  `/no_think` to the user's message for any `qwen3*` model and calls the OpenAI-compatible endpoint;
+  measured, neither does anything, and the instruction is visible to the model as part of what the
+  user said. The reason is that the no-think branch of the chat template is gated on `$.Think`, which
+  only Ollama's native API sets — so no wording can reach it. A template is just text, so
+  [`server/no-think.sh`](../server/no-think.sh) builds a variant with that branch pinned. Verified at
+  21/21 on tools and 0.07 s to first word, against 4.3 s for the stock model on an 8 GB card.
+- ⬜ The `/no_think` injection is still there and still does nothing useful. Worth removing upstream,
+  since it also puts the instruction in front of the model as part of the user's sentence.
 - ✅ **STT: English-only Whisper by default**, with the reason in the config: the provider never sends a
   language, so a multilingual model auto-detects per utterance and short ones are where that fails.
 - ✅ **TTS: Kokoro by default**, and the voice documented as a **loudness** decision rather than a taste
