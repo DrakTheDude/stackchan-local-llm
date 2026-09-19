@@ -325,6 +325,35 @@ constexpr uint8_t kGainFieldMask = 0x30;
 //    The picture was never a white-balance problem. See the gain walk in
 //    show_photo: exposure was pinned at the ceiling with the amplifier idle.
 
+// 🔆 LENGTHEN THE FRAME SO THE SENSOR'S AEC CAN EXPOSE PROPERLY.
+//
+//    Exposure cannot exceed the frame, and this mode's frame is about 252 rows
+//    (240 plus 0x0C of vertical blanking). Measured on the ISP path, the AEC
+//    asks for 480 and is clamped, so a lit room arrives at mean 34 and the
+//    ISP's gamma lifts it into a flat, milky picture.
+//
+//    Stretching vertical blanking roughly doubles the room available. This is
+//    the ONE thing the old manual path did that is worth keeping - it also
+//    pinned exposure and walked gain, which is what blew the highlights when
+//    fed to the sensor's own ISP.
+//
+// ⚠️ The sensor still decides. We are moving the ceiling, not choosing the
+//    exposure, which is the difference between helping its AEC and replacing it.
+// 🎯 AND THE AEC TARGET IS LEFT ALONE, MEASURED. Its default is 72 and moving
+//    it to 60 - meant to protect highlights that were riding a little hot -
+//    made the picture visibly worse, not better.
+//
+//    The reading: the ISP's gamma and contrast are tuned around the frames the
+//    sensor's OWN target produces, so shifting the target fights that curve
+//    rather than feeding it. Whatever finally trims the exposure on this path,
+//    it is not register 0xd3.
+void ExtendFrame(i2c_master_bus_handle_t bus) {
+    auto* dev = Dev(bus);
+    if (dev == nullptr) return;
+    Wr(dev, 0x02, 0xFF);   // vertical blanking, maximum
+    ESP_LOGI(TAG, "camera: frame lengthened (VB=0xFF) so the AEC has room");
+}
+
 void SetGain(i2c_master_bus_handle_t bus, int g) {
     if (g < 0) g = 0;
     if (g > kGainMax) g = kGainMax;
@@ -600,6 +629,37 @@ static void ChromaSpread(const uint8_t* src, size_t len, bool luma_even,
         if (au > *u_dev) *u_dev = au;
         if (av > *v_dev) *v_dev = av;
     }
+}
+
+// 📊 WHAT IS ACTUALLY IN AN RGB565 FRAME.
+//
+//    The sensor's own ISP output goes to the screen untouched, which means none
+//    of the YUV path's diagnostics run and a bad picture has no numbers behind
+//    it. These three tell apart faults that look the same from a metre away: a
+//    genuinely blown frame, a flat one the ISP has lifted, and a channel order
+//    that is wrong.
+static void Rgb565Stats(const uint8_t* data, size_t len, char* out, size_t out_len) {
+    const uint16_t* px = reinterpret_cast<const uint16_t*>(data);
+    const size_t n = len / 2;
+    if (n == 0) { snprintf(out, out_len, " rgb=empty"); return; }
+    uint32_t sr = 0, sg = 0, sb = 0;
+    int rlo = 255, rhi = 0, glo = 255, ghi = 0, blo = 255, bhi = 0;
+    for (size_t i = 0; i < n; i++) {
+        const uint16_t v = px[i];
+        const int r = ((v >> 11) & 0x1F) << 3;
+        const int g = ((v >> 5) & 0x3F) << 2;
+        const int b = (v & 0x1F) << 3;
+        sr += r; sg += g; sb += b;
+        if (r < rlo) rlo = r;
+        if (r > rhi) rhi = r;
+        if (g < glo) glo = g;
+        if (g > ghi) ghi = g;
+        if (b < blo) blo = b;
+        if (b > bhi) bhi = b;
+    }
+    snprintf(out, out_len, " rgb mean=%lu/%lu/%lu range=%d-%d/%d-%d/%d-%d",
+             (unsigned long)(sr / n), (unsigned long)(sg / n), (unsigned long)(sb / n),
+             rlo, rhi, glo, ghi, blo, bhi);
 }
 
 static uint8_t* ToRgb565(const uint8_t* src, size_t src_len, int w, int h,
@@ -2307,17 +2367,34 @@ public:
                 // 31 - because BeginStill stretches vertical blanking to 0xFF
                 // and the sensor's own frame is only ~252 rows. Gain sat at
                 // 0x14 either way, so AGC is not the lever it looked like.
-                constexpr bool kLetSensorExpose = false;
+                // 🔆 THE SENSOR EXPOSES ITSELF NOW, because the frame it
+                //    produces goes to the screen unprocessed.
+                //
+                //    The manual loop existed to rescue a raw YUV frame: pin
+                //    exposure at the frame ceiling, walk gain to maximum, and
+                //    let our tone curve sort out the rest. Handing that
+                //    deliberately over-driven frame to the sensor's OWN ISP -
+                //    whose gamma and contrast assume its own auto-exposure -
+                //    blows the highlights, which is exactly what the first
+                //    RGB565 photograph did: colour everywhere at last, and the
+                //    subject whitened out.
+                //
+                //    M5Stack's example does no tuning at all. On this path that
+                //    is not laziness, it is the matching half of the design.
+                constexpr bool kLetSensorExpose = true;
                 gc0308::Borrowed borrowed{};
                 if (!kLetSensorExpose) {
                     borrowed = gc0308::BeginStill(i2c_bus_);
                 } else {
+                    // Room first, then time: a longer frame is no use if the
+                    // AEC is not given a few of them to notice.
+                    gc0308::ExtendFrame(i2c_bus_);
                     // Give its AEC a few frames to settle on the scene. Capture()
-                    // discards two frames per call, so three calls is about nine
-                    // frames - half a second at 20fps.
-                    for (int i = 0; i < 3; i++) {
+                    // discards two frames per call, so five calls is about fifteen
+                    // frames - and it now has twice the exposure range to search.
+                    for (int i = 0; i < 5; i++) {
                         camera_->Capture();
-                        vTaskDelay(pdMS_TO_TICKS(120));
+                        vTaskDelay(pdMS_TO_TICKS(140));
                     }
                 }
                 bool got = false;
@@ -2469,12 +2546,41 @@ public:
                     if (!frame_diag.empty()) diag = frame_diag + "  " + diag;
                     if (halved != nullptr) heap_caps_free(halved);
                 } else if (fmt == V4L2_PIX_FMT_RGB565) {
+                    // 🎨 THIS SENSOR EMITS BGR565, NOT RGB565.
+                    //
+                    //    With the byte order correct, warm things still rendered
+                    //    blue-green: a face cyan, a lamp blue, and every edge
+                    //    perfectly sharp. Detail intact with colour rotated is
+                    //    the signature of transposed channels, not of exposure,
+                    //    white balance or endianness - all of which were tried
+                    //    first.
+                    //
+                    //    Red is bits 15:11 and blue is bits 4:0, so they trade
+                    //    places; green is centred and stays. Done here rather
+                    //    than in the shared driver because it is a fact about
+                    //    what this sensor emits in this mode.
+                    {
+                        char rbuf[96];
+                        yuv422::Rgb565Stats(data, static_cast<size_t>(w) * h * 2,
+                                            rbuf, sizeof(rbuf));
+                        diag += rbuf;
+                    }
                     // Already what the panel wants. Copy anyway: the preview
                     // outlives this call and EspVideo reuses its frame buffer.
                     const size_t n = static_cast<size_t>(out_w) * out_h * 2;
                     rgb = static_cast<uint8_t*>(
                         heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-                    if (rgb != nullptr) memcpy(rgb, data, n);
+                    if (rgb != nullptr) {
+                        const uint16_t* in = reinterpret_cast<const uint16_t*>(data);
+                        uint16_t* out = reinterpret_cast<uint16_t*>(rgb);
+                        for (size_t i = 0; i < n / 2; i++) {
+                            const uint16_t px = in[i];
+                            out[i] = static_cast<uint16_t>(
+                                ((px & 0x001F) << 11) |    // blue  -> red
+                                 (px & 0x07E0) |           // green stays
+                                ((px & 0xF800) >> 11));    // red   -> blue
+                        }
+                    }
                 } else {
                     ESP_LOGW(TAG, "frame format 0x%08" PRIx32 " is not one we can convert",
                              (uint32_t)fmt);

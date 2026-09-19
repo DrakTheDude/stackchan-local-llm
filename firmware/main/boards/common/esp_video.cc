@@ -199,6 +199,8 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
                 return 0;
             case V4L2_PIX_FMT_RGB565:
                 return 1;
+            case V4L2_PIX_FMT_RGB565X:
+                return 1;   // big-endian; Capture() swaps it and relabels
 #ifdef CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_ENCODER
             case V4L2_PIX_FMT_YUV420:  // the software JPEG encoder doesn't support YUV420
                 return 2;
@@ -221,6 +223,12 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
                 return 10;
             case V4L2_PIX_FMT_RGB565:
                 return 11;
+            // 🎨 Preferred over YUV on purpose: this arrives with the sensor's
+            //    own gamma, colour matrix and contrast applied, which is what
+            //    the vendor's example displays. Everything this project does to
+            //    a YUV frame is a stand-in for the ISP we were declining to use.
+            case V4L2_PIX_FMT_RGB565X:
+                return 9;
             case V4L2_PIX_FMT_RGB24:
                 return 12;
 #ifdef CONFIG_XIAOZHI_ENABLE_HARDWARE_JPEG_ENCODER
@@ -527,8 +535,18 @@ bool EspVideo::Capture() {
                     break;
                 }
                 case V4L2_PIX_FMT_RGB565X: {
-                    // big-endian RGB565 needs converting to little-endian
-                    // esp_video currently reports RGB565 for both byte orders and never RGB565X; this case is for future versions
+                    // Big-endian RGB565. Whether that needs swapping depends on
+                    // the panel, which is what every other format here decides
+                    // with CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP - so
+                    // this honours the board's endianness setting too.
+                    //
+                    // 🔴 AND IT IS NEEDED, MEASURED. Making it conditional on
+                    //    CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP - which
+                    //    this board does not set - produced a blown white frame
+                    //    speckled with eight colours, the signature of RGB565
+                    //    read with its bytes the wrong way round. The swap is
+                    //    right; the cast that prompted the experiment is a
+                    //    CHANNEL-order problem, handled in the board.
                     auto src16 = (uint16_t*)mmap_buffers_[buf.index].start;
                     auto dst16 = (uint16_t*)frame_.data;
                     size_t pixel_count = (size_t)frame_.width * (size_t)frame_.height;

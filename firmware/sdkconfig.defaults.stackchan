@@ -93,8 +93,24 @@ CONFIG_CAMERA_GC0308_AUTO_DETECT_DVP_INTERFACE_SENSOR=y
 #    in. Worth doing - M5Stack's own StackChan example uses RGB565 and theirs
 #    are the pictures described as clear and colourful - but it is a code
 #    change, not this line.
-CONFIG_CAMERA_GC0308_DVP_YUV422_320X240_20FPS=y
-CONFIG_CAMERA_GC0308_DVP_DEFAULT_FMT_YUV422_320X240_20FPS=y
+# 🎨 THE SENSOR'S OWN RGB, NOT ITS RAW YUV.
+#
+#    RGB565 leaves the sensor's internal ISP with its factory gamma, colour
+#    matrix and contrast already applied. YUV422 does not - which is why this
+#    project grew a tone curve, a chroma scale and a dither to stand in for an
+#    ISP it was declining to use, and why a lit room came out as a near-white
+#    subject on speckled black.
+#
+#    M5Stack's own StackChan example asks for exactly this, and theirs are the
+#    pictures described as clear and colourful.
+#
+# ⚠️ BIG-ENDIAN, which is what defeated the first attempt: the driver reports
+#    V4L2_PIX_FMT_RGB565X, EspVideo's format ranking had no entry for it, and
+#    the camera never opened - "no supported pixel format found", surfacing as
+#    "the camera would not start" on every photo. Both rankings accept it now,
+#    and Capture() already knew how to swap the bytes.
+CONFIG_CAMERA_GC0308_DVP_RGB565_BE_320X240_20FPS=y
+CONFIG_CAMERA_GC0308_DVP_DEFAULT_FMT_RGB565_BE_320X240_20FPS=y
 CONFIG_LANGUAGE_EN_US=y
 
 # The server address the robot asks for its voice session.
