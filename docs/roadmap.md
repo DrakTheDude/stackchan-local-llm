@@ -190,7 +190,7 @@ project proved the path end to end.
 - ⬜ **Reference status server** — a few dozen lines, so the ring and idle screen can be tried with no
   homelab. The reference project's homelab integration becomes one example, not a requirement.
 - ⬜ **The robot's own tools**, documented as an API: head, LED ring, camera, test hooks
-- ⬜ 🔴 **Safety guidance.** Voice has no confirmation step, and speech recognition mishears. Recommend
+- ✅ 🔴 **Safety guidance.** [docs/tool-safety.md](tool-safety.md). Voice has no confirmation step, and speech recognition mishears. Recommend
   read-only tools by default and an explicit allowlist for anything that changes the world — a misheard
   sentence must not be able to unlock a door.
 - ✅ 🔴 **Audit the upstream device tools the model can call.** Done, and the finding was that

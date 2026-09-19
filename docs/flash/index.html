@@ -53,6 +53,18 @@
   comparison. Installing without erasing writes only what it needs and leaves that area alone.</p>
 </div>
 
+<div class="panel warn">
+  <p><strong>⚠️ An interrupted write can leave the robot unable to boot.</strong></p>
+  <p>Most failures here are recoverable — the ESP32's bootloader survives a bad app image, and
+  M5Burner can restore a device that will not start. But a write interrupted at the wrong moment can
+  leave a robot that <strong>does not come back easily</strong>, and the usual causes are outside
+  anyone's control: a cable nudged out, a power cut, a failing USB port, a hub that drops under
+  load.</p>
+  <p>Use a cable you trust and a port directly on the machine rather than through a hub, and do not
+  unplug anything until this page says it has finished. You are flashing your own hardware at your own
+  risk; this software comes with no warranty of any kind.</p>
+</div>
+
 <h2>Then</h2>
 <ol>
   <li>Plug the robot into this computer with a USB-C cable that carries <em>data</em>.</li>

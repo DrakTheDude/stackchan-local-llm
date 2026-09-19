@@ -17,6 +17,20 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 > report from a second is the most useful thing you could contribute — see
 > [docs/roadmap.md](docs/roadmap.md), and [tools/model-bench](tools/model-bench) if it is the GPU.
 
+> ⚠️ **Flashing writes to the device, and an interrupted write can brick it.** Most failures are
+> recoverable — the ESP32 has a bootloader that survives a bad app image, and M5Burner can restore a
+> device that will not start. But a write interrupted at the wrong moment, by a cable nudged out, a
+> power cut, a failing USB port or a hub that drops under load, can leave a robot that does not boot
+> and does not come back easily. Those are circumstances outside anyone's control, including this
+> project's.
+>
+> **So: back up the factory firmware before you flash anything.** M5Stack do not publish it, and it is
+> the only copy you will ever have. Use a cable you trust, a port directly on the machine rather than
+> through a hub, and do not unplug anything until the flasher says it has finished.
+>
+> This software comes with no warranty of any kind — see [LICENSE](LICENSE). You are flashing your own
+> hardware at your own risk.
+
 ## What it does
 
 | | |
@@ -37,6 +51,7 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 | **[What you gain and lose](docs/stock-vs-local.md)** | honestly, against the firmware it shipped with. He will not dance any more |
 | **[Standing up your own model](docs/your-llm.md)** | NVIDIA, Apple Silicon, AMD, or something else entirely — and the one check that tells you whether your GPU is really being used |
 | **[Which model do you need](docs/model-floor.md)** | fifteen models measured on one card: tool calling, time to first spoken word, VRAM. Most of our guesses were wrong |
+| **[Giving him tools, safely](docs/tool-safety.md)** | read-only by default, and why hiding a tool is not the same as disabling it |
 | **[Letting him see](docs/vision.md)** | a vision model on your own card, about 4 GB and a third of a second per photo — and what it costs you in the privacy checks |
 | **[Check the privacy claim](docs/privacy.md)** | six checks you can run yourself, and what this does *not* protect you from |
 | **[Roadmap](docs/roadmap.md)** | what is done, what is next, and what is still verified on only one robot |
