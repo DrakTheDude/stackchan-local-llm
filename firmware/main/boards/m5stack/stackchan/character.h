@@ -66,6 +66,27 @@ struct Palette {
     // with it - a face repainted onto somebody else's furniture is half a body.
     uint32_t text;
     uint32_t panel;   // assistant bubbles, cards
+
+    // 🔑 The LED ring's resting colour, and NOT the screen's glow. An LED is a
+    //    light source: a pale colour reads as white-with-a-hint at any real
+    //    brightness, so the ring wants a saturated version of the same idea.
+    //
+    // ⚠️ Severity - ok, warn, alert, stale - is never a body's to set. A body
+    //    that wants a different accent almost never wants a different meaning
+    //    for "something is wrong".
+    //
+    // 🔴 AND CLASSIC'S RED IS A LATENT COLLISION, worth knowing before it bites.
+    //    Alert is red too. Today that costs nothing: the severity colours belong
+    //    to StatusSource, nothing is attached to it, and the ring always rests
+    //    on the accent. The day an ambient status source lands, resting and
+    //    alerting will differ by PATTERN alone - breathing against blinking -
+    //    where today they differ by colour as well.
+    //
+    //    This red is deliberately deep and saturated, well away from the soft
+    //    salmon alert uses, to keep as much of that distinction as there is. If
+    //    it ever proves too thin, the answer is a second signal - the face
+    //    already changes and the head can move - not a brighter red.
+    uint32_t led;
 };
 
 struct Look {
@@ -198,7 +219,7 @@ struct Mood {
 inline constexpr Body kBodies[] = {
     {"drax", "Drax",
      Palette{0xF2FAFF, 0xF2FAFF, 0x07080E, 0xFFFFFF, 0xA855FF, 0x000000,
-             0xC9A9FF, 0x1A1430},
+             0xC9A9FF, 0x1A1430, 0xA17EFF},
      Look{1.00f, 1.00f}},
 
     // 🖥️ A DIFFERENT ROBOT, not a repainted one. Dark ink on a white ground and
@@ -208,7 +229,7 @@ inline constexpr Body kBodies[] = {
     //    Its voice and persona live on the server under this same id.
     {"classic", "Classic",
      Palette{0xFFFFFF, 0x0A0A0A, 0x111111, 0xFFFFFF, 0x808080, 0xE8E8E8,
-             0x111111, 0xCFCFCF},
+             0x111111, 0xCFCFCF, 0xFF2A2A},
      Look{1.00f, 0.00f}},
 };
 

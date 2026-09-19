@@ -1,4 +1,5 @@
 #include "stackchan_leds.h"
+#include "character.h"
 
 #include "application.h"
 #include "status_source.h"
@@ -53,6 +54,16 @@ struct NamedColor {
     const char* name;
     RgbColor color;
 };
+
+// 🎭 The resting colour of the ring, from the body in force. Converted here
+//    rather than stored as an RgbColor, so character.h does not have to know
+//    what an LED is.
+RgbColor BodyAccent() {
+    const uint32_t c = character::CurrentPalette().led;
+    return RgbColor{static_cast<uint8_t>((c >> 16) & 0xFF),
+                    static_cast<uint8_t>((c >> 8) & 0xFF),
+                    static_cast<uint8_t>(c & 0xFF)};
+}
 
 const NamedColor kNamedColors[] = {
     {"lavender", palette::kLavender}, {"purple", palette::kLavender},
@@ -472,7 +483,7 @@ void StackChanLeds::IdleAmbient() {
     // No source, or nothing read yet: lavender. Not a status colour, because
     // it is not one.
     if (status_ == nullptr || status_->age_seconds() < 0) {
-        Breathe(palette::kLavender, kCalm, kFloor);
+        Breathe(BodyAccent(), kCalm, kFloor);
         return;
     }
 
@@ -537,7 +548,7 @@ void StackChanLeds::OnStateChanged() {
     ESP_LOGI(TAG, "state -> %d", static_cast<int>(app.GetDeviceState()));
     switch (app.GetDeviceState()) {
         case kDeviceStateStarting:
-            Comet(palette::kLavender, 60);
+            Comet(BodyAccent(), 60);
             break;
         case kDeviceStateWifiConfiguring:
             Blink(palette::kBlue, 500);
@@ -558,16 +569,16 @@ void StackChanLeds::OnStateChanged() {
             break;
         case kDeviceStateListening:
         case kDeviceStateAudioTesting:
-            Comet(palette::kLavender, 90);
+            Comet(BodyAccent(), 90);
             break;
         case kDeviceStateSpeaking:
-            Solid(palette::kLavender);
+            Solid(BodyAccent());
             break;
         case kDeviceStateUpgrading:
             Blink(palette::kBlue, 200);
             break;
         case kDeviceStateActivating:
-            Blink(palette::kLavender, 500);
+            Blink(BodyAccent(), 500);
             break;
         case kDeviceStateFatalError:
             Solid(palette::kRed);

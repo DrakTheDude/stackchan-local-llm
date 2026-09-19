@@ -842,6 +842,10 @@ private:
         if (face_ != nullptr) {
             face_->Repaint();
         }
+        // The ring too. OnStateChanged re-dispatches on the CURRENT device
+        // state, so this refreshes the resting colour without assuming he is
+        // idle - a body changed mid-sentence still gets its accent.
+        leds_.OnStateChanged();
         return next.label;
     }
 
