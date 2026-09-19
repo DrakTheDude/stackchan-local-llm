@@ -18,6 +18,31 @@ from pathlib import Path
 ROOT = Path("/opt/xiaozhi-esp32-server")
 
 REPLACEMENTS = [
+    # 🔴 DO NOT SEND `tts stop` WHEN THE CONNECTION IS ABOUT TO CLOSE.
+    #
+    #    `tts stop` means "I have finished speaking, your turn", and the firmware
+    #    reads it exactly that way: in the default auto-listening mode it leaves
+    #    Speaking for Listening, which OPENS A NEW AUDIO CHANNEL. Sending it and
+    #    then closing tells the robot to start a fresh session and hangs up in
+    #    the same breath - so it reconnects, greets the room and listens, and the
+    #    idle timeout never actually puts it to sleep.
+    #
+    #    Seen in the log as a reconnect one second after the goodbye:
+    #        客户端断开连接  /  <robot ip> conn - Headers…   (one second later)
+    #
+    # ⚠️ The stop does not end the audio - the queued packets do. It only drives
+    #    the device state machine, so skipping it on this one path costs nothing
+    #    and OnAudioChannelClosed sets Idle when the close lands.
+    (
+        "core/handle/sendAudioHandle.py",
+        """        await send_tts_message(conn, "stop", None)
+        if conn.close_after_chat:
+            await conn.close()""",
+        """        if conn.close_after_chat:
+            await conn.close()
+        else:
+            await send_tts_message(conn, "stop", None)""",
+    ),
     # 🔴 MARKDOWN COMES OFF BEFORE PUNCTUATION DOES.
     #
     #    Heard: "Image](https://via.placeholder.com/300x200)", spoken.
