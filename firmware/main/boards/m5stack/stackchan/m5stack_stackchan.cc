@@ -792,6 +792,9 @@ private:
     //
     //    Stored by id, never by index: an index shifts the moment somebody
     //    inserts a row, and the robot comes back as somebody else.
+    // 🎭 The server's half of a body is keyed by this. See the hello message.
+    virtual std::string GetBodyId() override { return character::CurrentBodyId(); }
+
     void LoadCharacter() {
         Settings settings("stackchan", false);
 

@@ -66,6 +66,11 @@ public:
 
     virtual ~Board() = default;
     virtual std::string GetBoardType() = 0;
+    // 🎭 Which body this robot is wearing, if it has the notion. Sent in the
+    //    hello message so a server can pick the matching voice and persona - the
+    //    id is the only thing the two halves share. Empty means "no bodies
+    //    here", which is every board but one.
+    virtual std::string GetBodyId() { return ""; }
     virtual std::string GetUuid() { return uuid_; }
     virtual Backlight* GetBacklight() { return nullptr; }
     virtual Led* GetLed();

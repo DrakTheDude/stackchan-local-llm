@@ -205,6 +205,15 @@ std::string WebsocketProtocol::GetHelloMessage() {
     cJSON_AddBoolToObject(features, "aec", true);
 #endif
     cJSON_AddBoolToObject(features, "mcp", true);
+    // 🎭 Which body this robot is wearing, when it has the notion. A server that
+    //    knows the name can pick the matching voice and persona; one that does
+    //    not simply ignores a string. Empty on every board that has no bodies.
+    {
+        const auto body = Board::GetInstance().GetBodyId();
+        if (!body.empty()) {
+            cJSON_AddStringToObject(features, "body", body.c_str());
+        }
+    }
     cJSON_AddItemToObject(root, "features", features);
     AddTextFontCapabilities(root);
     cJSON_AddStringToObject(root, "transport", "websocket");
