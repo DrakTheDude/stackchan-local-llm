@@ -1,4 +1,5 @@
 #include "stacky_face.h"
+#include "character.h"
 
 #include "display/lvgl_display/lvgl_theme.h"
 #include "assets/lang_config.h"
@@ -145,27 +146,38 @@ static const NamedShape kShapes[] = {
 
 // Applies kScaleNum/kScaleDen to a table entry. The ONE place the table's
 // original 128px-face pixels become screen pixels.
+// 🎨 THE ONE PLACE A CHARACTER'S LOOK REACHES THE FACE.
+//
+//    Every expression in the table is design-space, and this is where design
+//    space becomes screen pixels - so it is also the only place face_unit has to
+//    be applied. A character that changes the face's size changes it here, once,
+//    for all 21 expressions and every mode overlay on top of them.
+// Design space -> screen pixels -> the character's own scale. Kept separate
+// from Scaled() because that one is constexpr and serves the layout constants,
+// which a character does not reach yet.
+static int ScaledFor(int design_px) { return character::FaceLen(Scaled(design_px)); }
+
 static StackyFace::FaceShape ScaleShape(const StackyFace::FaceShape& s) {
     auto eye = [](const StackyFace::EyeShape& e) {
         return StackyFace::EyeShape{
-            static_cast<uint8_t>(Scaled(e.w)),        static_cast<uint8_t>(Scaled(e.h)),
-            static_cast<uint8_t>(Scaled(e.radius)),   static_cast<uint8_t>(Scaled(e.lid_top)),
-            static_cast<uint8_t>(Scaled(e.lid_bottom))};
+            static_cast<uint8_t>(ScaledFor(e.w)),        static_cast<uint8_t>(ScaledFor(e.h)),
+            static_cast<uint8_t>(ScaledFor(e.radius)),   static_cast<uint8_t>(ScaledFor(e.lid_top)),
+            static_cast<uint8_t>(ScaledFor(e.lid_bottom))};
     };
     auto brow = [](const StackyFace::BrowShape& b) {
-        return StackyFace::BrowShape{static_cast<int8_t>(Scaled(b.inner)),
-                                     static_cast<int8_t>(Scaled(b.outer))};
+        return StackyFace::BrowShape{static_cast<int8_t>(ScaledFor(b.inner)),
+                                     static_cast<int8_t>(ScaledFor(b.outer))};
     };
     return StackyFace::FaceShape{
         eye(s.left),
         eye(s.right),
         brow(s.brow_l),
         brow(s.brow_r),
-        static_cast<int8_t>(Scaled(s.gaze_x)),
-        static_cast<int8_t>(Scaled(s.gaze_y)),
-        static_cast<uint8_t>(Scaled(s.mouth_w)),
-        static_cast<int8_t>(Scaled(s.mouth_curve)),
-        static_cast<uint8_t>(Scaled(s.mouth_open)),
+        static_cast<int8_t>(ScaledFor(s.gaze_x)),
+        static_cast<int8_t>(ScaledFor(s.gaze_y)),
+        static_cast<uint8_t>(ScaledFor(s.mouth_w)),
+        static_cast<int8_t>(ScaledFor(s.mouth_curve)),
+        static_cast<uint8_t>(ScaledFor(s.mouth_open)),
     };
 }
 

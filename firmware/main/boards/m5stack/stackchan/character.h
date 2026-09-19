@@ -41,6 +41,42 @@ constexpr int kMaxMoveMs = 6000;    // nor leave it crawling for a minute
 constexpr float kMaxPanDeg = 45.0f;   // inside the head's own +/-70 safe window
 constexpr float kMaxTiltDeg = 20.0f;  // inside its +/-35
 
+// 🎨 THE LOOK HALF. A character's geometry is written in the SAME 128px design
+//    space as the expression table, never in screen pixels - authoring in screen
+//    pixels is resolving at authoring time, and it would make this token
+//    impossible to express.
+struct Look {
+    // Multiplies the whole face's geometry on top of the panel scale. 0.85 is a
+    // smaller, more compact face; 1.1 is a broader one.
+    float face_unit = 1.0f;
+};
+
+// 📏 BOTH BOUNDS ARE MEASURED, not guessed - three builds, three captures off
+//    the robot's own screen, looked at rather than reasoned about.
+//
+//    0.75 was tried and judged too small: the eyes lose presence and the brows
+//    detach from them, because in this pass the LAYOUT does not scale with the
+//    shape. So the floor sits above it.
+//
+//    At 1.12 the eyes nearly touch the brows, which is the right place to stop -
+//    the table's own rule is that eye heights stay at or under 66 so the sclera
+//    clears the brows above and the mouth below, and a character that can exceed
+//    that draws a face on top of itself.
+constexpr float kMinFaceUnit = 0.85f;
+constexpr float kMaxFaceUnit = 1.12f;
+
+inline Look& CurrentLook() {
+    static Look l;
+    return l;
+}
+
+// A design-space length, through the character. Rounded, because these become
+// pixel counts and a half pixel is a blurred edge on a 320x240 panel.
+inline int FaceLen(int design_px) {
+    const float u = std::clamp(CurrentLook().face_unit, kMinFaceUnit, kMaxFaceUnit);
+    return static_cast<int>(std::lround(design_px * u));
+}
+
 struct Motion {
     // Multiplies every duration and interval: servo move time, glance hold,
     // and the idle timings that sit between them.
