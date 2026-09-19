@@ -61,6 +61,19 @@ public:
     virtual std::string Explain(const std::string& question);
     virtual bool CanExplain() const { return !explain_url_.empty(); }
 
+    // 🔴 THE SENSOR DOES NOT NEED TO RUN WHEN NOBODY IS LOOKING.
+    //
+    //    Streaming starts at init by default, which means continuous DMA into
+    //    PSRAM from boot for a camera used seconds a day. The wake-word engine
+    //    shares that bus, and the cost scales with the sensor mode: choosing a
+    //    brighter mode for the picture took it from 3 MB/s to 9.8 and voice
+    //    detection started missing.
+    //
+    //    Both are safe to call when already in the requested state.
+    bool StartStreaming();
+    void StopStreaming();
+    bool streaming() const { return streaming_on_; }
+
     // 🔴 SHOW THE MODEL WHAT THE PERSON IS LOOKING AT.
     //
     //    Explain() encodes the raw sensor frame. On this camera that frame is

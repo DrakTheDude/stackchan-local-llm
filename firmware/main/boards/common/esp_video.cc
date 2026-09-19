@@ -364,6 +364,13 @@ EspVideo::EspVideo(const esp_video_init_config_t& config) {
 #else
     ESP_LOGI(TAG, "Camera init success");
     streaming_on_ = true;
+    // 🔴 AND STRAIGHT BACK OFF AGAIN. Init streams on purpose - it is the proof
+    //    that the pipeline works, and a failure is worth seeing at boot rather
+    //    than the first time somebody asks for a photo. But leaving it running
+    //    costs continuous DMA into PSRAM for a camera nobody is looking at, and
+    //    the wake-word engine shares that bus. show_photo turns it back on.
+    StopStreaming();
+    ESP_LOGI(TAG, "camera streaming stopped until a photo is asked for");
 #endif  // CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE
 }
 
@@ -383,6 +390,48 @@ EspVideo::~EspVideo() {
     }
     sensor_format_ = 0;
     esp_video_deinit();
+}
+
+bool EspVideo::StartStreaming() {
+    if (video_fd_ < 0) return false;
+    if (streaming_on_) return true;
+
+    // ⚠️ THE BUFFERS HAVE TO BE HANDED BACK FIRST. STREAMOFF returns every
+    //    queued buffer to us, so streaming on again with none queued gives a
+    //    driver with nowhere to write - and the failure is a DQBUF timeout
+    //    later, nowhere near here.
+    for (uint32_t i = 0; i < mmap_buffers_.size(); i++) {
+        struct v4l2_buffer buf = {};
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index = i;
+        if (ioctl(video_fd_, VIDIOC_QBUF, &buf) != 0) {
+            ESP_LOGE(TAG, "StartStreaming: VIDIOC_QBUF %lu failed", (unsigned long)i);
+            return false;
+        }
+    }
+
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(video_fd_, VIDIOC_STREAMON, &type) != 0) {
+        ESP_LOGE(TAG, "StartStreaming: VIDIOC_STREAMON failed");
+        return false;
+    }
+    streaming_on_ = true;
+    return true;
+}
+
+void EspVideo::StopStreaming() {
+    if (!streaming_on_ || video_fd_ < 0) return;
+    if (encoder_thread_.joinable()) {
+        // The JPEG encoder reads frame_, not the mmap buffers, but finishing
+        // here keeps "stopped" meaning nothing of ours is still running.
+        encoder_thread_.join();
+    }
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(video_fd_, VIDIOC_STREAMOFF, &type) != 0) {
+        ESP_LOGW(TAG, "StopStreaming: VIDIOC_STREAMOFF failed");
+    }
+    streaming_on_ = false;
 }
 
 void EspVideo::SetExplainUrl(const std::string& url, const std::string& token) {

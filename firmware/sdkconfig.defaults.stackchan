@@ -33,15 +33,66 @@ CONFIG_CAMERA_GC0308_AUTO_DETECT_DVP_INTERFACE_SENSOR=y
 #
 # ⚠️ This is also the driver's OWN default. The override to 320x240 came in
 #    with the port, and matching the panel was the wrong reason for it.
-# ⚠️ VGA IS PARKED, NOT ABANDONED - see the note above. VIDIOC_STREAMON runs at
-#    init, so the sensor streams CONTINUOUSLY from boot whether or not anybody
-#    wants a photo: 9.8 MB/s of DMA into PSRAM at 640x480/16fps against 3.1 at
-#    320x240/20fps. The wake-word engine shares that bus, and detection went
-#    spotty the moment this was enabled.
+# 📷 VGA, FOR THE LIGHT RATHER THAN THE RESOLUTION.
 #
-#    The fix is to stream only while taking a photo, which is a change to the
-#    capture path rather than to a config line. Until that exists, this stays at
-#    QVGA and the picture stays dark.
+#    The panel is 320x240 and the frame is averaged back down to it before
+#    anything is drawn. What VGA buys is exposure: this sensor counts exposure
+#    in ROW TIMES, and the 640x480 mode's rows are twice as long as the 320x240
+#    subsampled mode's - HB 0x6A against 0x32 - so the same exposure value
+#    collects twice the light. The slower frame (16fps against 20) lifts the
+#    ceiling again. Measured at the ceiling in the old mode, in a lit room:
+#    mean luma 31 out of 255.
+#
+#    The 2x2 average on the way down (HalveUyvy) is the other half: four samples
+#    per output pixel, which cuts noise and - because the CHROMA averages too -
+#    is most of why colour survives in a dim room. The sensor's own 320x240 mode
+#    cannot do this; it SUBSAMPLES, throwing three pixels of every four away.
+#
+# 🔴 THIS IS ONLY SAFE BECAUSE THE CAMERA NO LONGER STREAMS WHEN IDLE.
+#
+#    VIDIOC_STREAMON used to run at init, so the sensor filled PSRAM over DMA
+#    from boot: 3.1 MB/s at QVGA, 9.8 at VGA. The wake-word engine shares that
+#    bus and detection went spotty within minutes the first time VGA was tried.
+#    EspVideo::StartStreaming/StopStreaming now bracket the capture, so that
+#    load exists for about a second per photo. If streaming ever goes back to
+#    always-on, this line has to go back to QVGA with it.
+# 🔴 AND IT WAS MEASURED AND REJECTED. The argument above is WRONG, and the
+#    numbers are here so nobody rebuilds it from the same reasoning:
+#
+#        QVGA   mean luma 31, brightest pixel 116
+#        VGA    mean luma 15, brightest pixel  37
+#
+#    VGA is DARKER. The row-time argument ignored the clock: this mode also
+#    changes the PLL (F7=0x12, F8=0x0A against 0x04, 0x02), so a row that is
+#    twice as many pixel-clocks is not twice as long in seconds. HB is counted
+#    in clocks, and comparing two modes by HB alone assumes a constant one.
+#
+#    The 2x2 average (HalveUyvy) is still in the tree and still correct - it
+#    just cannot rescue a frame with nothing in it. Whatever fixes this picture,
+#    it is not this mode.
+# 🎨 RGB565 RATHER THAN YUV422, which is what M5Stack's own StackChan example
+#    asks for. Their pictures are the ones described as clear and colourful.
+#
+#    This hands the colour work to the sensor's internal pipeline - its colour
+#    matrix and white balance - instead of converting its YUV ourselves. The
+#    evidence it matters: the vision model called our picture "black and white"
+#    rather than "dark", and our conversion already boosts chroma 1.75x, so the
+#    chroma arriving must be flat before we touch it.
+# 🔴 AND RGB565 IS NOT REACHABLE FROM HERE, which is why this says YUV422
+#    again. This sensor offers RGB565 only in BIG-endian, and EspVideo ranks
+#    the formats it understands - RGB565, RGB24, YUYV, UYVY, GREY, YUV422P -
+#    with no entry for the BE fourcc. It found nothing usable and never opened
+#    the camera at all:
+#
+#        E EspVideo: no supported pixel format found
+#
+#    Every photo then answered "the camera would not start", which reads like a
+#    hardware fault and is a missing line in a switch statement.
+#
+#    Using it means teaching EspVideo that fourcc and byte-swapping on the way
+#    in. Worth doing - M5Stack's own StackChan example uses RGB565 and theirs
+#    are the pictures described as clear and colourful - but it is a code
+#    change, not this line.
 CONFIG_CAMERA_GC0308_DVP_YUV422_320X240_20FPS=y
 CONFIG_CAMERA_GC0308_DVP_DEFAULT_FMT_YUV422_320X240_20FPS=y
 CONFIG_LANGUAGE_EN_US=y

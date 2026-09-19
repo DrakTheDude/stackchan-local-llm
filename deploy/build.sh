@@ -76,6 +76,29 @@ IDF_ARGS=(-DIDF_TARGET=esp32s3 -DSDKCONFIG_DEFAULTS="$DEFAULTS")
 #    Both are one `reconfigure` away, so just notice and do it.
 NEED_RECONFIG=""
 [[ main/Kconfig.projbuild -nt sdkconfig ]] && NEED_RECONFIG="Kconfig.projbuild changed"
+
+# 🔴 A DEFAULTS FILE THAT CHANGED AFTER sdkconfig WAS WRITTEN DOES NOTHING.
+#
+#    sdkconfig is generated once and then kept, and a `default` only applies to
+#    a value that is not already in it. So editing sdkconfig.defaults.stackchan
+#    and rebuilding looks exactly like a successful change and is not one.
+#
+#    Found the hard way: a camera mode was reverted in the defaults, the build
+#    succeeded, and the sensor carried on running the mode it already had -
+#    while delivering frames sized for the other one. Every measurement taken
+#    afterwards described a configuration that neither file asked for.
+#
+# ⚠️ RECONFIGURE IS NOT ENOUGH ON ITS OWN for a changed CHOICE: idf.py
+#    reconfigure re-runs Kconfig against the existing sdkconfig, and the old
+#    choice is still in there. The stale file has to go.
+for d in sdkconfig.defaults sdkconfig.defaults.stackchan sdkconfig.defaults.local; do
+    [[ -f "$d" && "$d" -nt sdkconfig ]] || continue
+    echo "note: $d is newer than sdkconfig - regenerating it, because a default"
+    echo "      cannot override a value sdkconfig already holds"
+    rm -f sdkconfig
+    NEED_RECONFIG="${NEED_RECONFIG:+$NEED_RECONFIG; }$d changed"
+    break
+done
 if [[ -f build/CMakeCache.txt ]]; then
     # Any board source newer than the cache means the glob may be stale.
     # Not `find ... | grep -q .`: grep -q exits on the first line, find takes
