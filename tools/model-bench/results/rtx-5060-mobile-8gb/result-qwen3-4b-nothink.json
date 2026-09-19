@@ -1,7 +1,7 @@
 {
   "model": "qwen3:4b",
   "hardware": "RTX 5060 Mobile 8GB",
-  "base_url": "http://192.168.1.171:11434/v1",
+  "base_url": "http://<your-llm-host>:11434/v1",
   "temperature": 0.75,
   "thinking": "off (verified)",
   "cold_load_s": 20.0,

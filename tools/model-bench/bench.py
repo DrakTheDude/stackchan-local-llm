@@ -50,6 +50,7 @@ standard library, so it runs on a laptop without setting anything up.
 
 import argparse
 import json
+import re
 import statistics
 import sys
 import time
@@ -283,6 +284,17 @@ def call_native_no_think(ollama_host, model, messages, timeout, temperature, max
     }
     payload["_thought_chars"] = thought
     return payload, elapsed
+
+
+def redact_host(url):
+    """Keep the shape of the endpoint, drop whose machine it was.
+
+    Results from this bench are meant to be shared - that is the whole point of
+    the results directory - and a private address published with them is a leak
+    nobody intended. The port stays, because it tells a reader which server was
+    being spoken to.
+    """
+    return re.sub(r"//[^/:]+", "//<your-llm-host>", url)
 
 
 def call(base_url, model, messages, timeout, temperature, max_tokens, with_tools=True):
@@ -642,7 +654,10 @@ def main():
     summary = {
         "model": a.model,
         "hardware": a.label,
-        "base_url": a.base_url,
+        # The endpoint is somebody's LAN address and says nothing a reader
+        # needs - "hardware" already names the card that produced these
+        # numbers. Results get published; the host does not go with them.
+        "base_url": redact_host(a.base_url),
         "temperature": a.temperature,
         "thinking": (
             ("off (verified)" if not ignored_thinking
