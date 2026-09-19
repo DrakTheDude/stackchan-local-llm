@@ -90,12 +90,19 @@ English-first board support, with every hardware assumption written down next to
   4.1 GB and ~0.35 s per frame, and sits alongside the chat model rather than swapping with it. See
   [vision.md](vision.md), and [privacy.md](privacy.md) for the check that replaced "GetCamera()
   returns nullptr".
-- ⬜ 🔴 **Stream the camera only while taking a photo.** `VIDIOC_STREAMON` runs at init, so the sensor
-  streams continuously from boot — 3 MB/s of PSRAM DMA, permanently, for a camera used seconds a day.
-  It also blocks the fix for the picture quality: the 640×480 mode doubles the row time and therefore
-  the light, but at VGA that continuous load becomes 9.8 MB/s, the wake-word engine shares the bus and
-  detection goes spotty. Per-photo streaming fixes both. `HalveUyvy()` is already in the tree for the
-  2×2 average back down to the panel.
+- ✅ **Stream the camera only while taking a photo.** `StartStreaming`/`StopStreaming` bracket the
+  capture, so the sensor is idle when nobody is taking a picture instead of burning 3 MB/s of PSRAM
+  DMA from boot. This was also a correctness fix: at VGA the continuous load reaches 9.8 MB/s, the
+  wake-word engine shares that bus, and detection went spotty the moment VGA was tried.
+- ✅ **The photograph is good now** — metered in firmware rather than left to the sensor, which stops
+  at exposure 480 with the frame three stops under and its own gamma hiding the shortfall. Exposure
+  first, then gain, corrected by the cube law the ISP's gamma imposes. Black floor 24 → 6, median 71,
+  full range in use, consistent run to run. See [vision.md](vision.md).
+
+  ⚠️ **The VGA theory in the previous version of this item was wrong** and is recorded in vision.md so
+  nobody retries it: VGA made the picture *darker* (mean 15 against 31), because the mode changes the
+  PLL as well as the row length. `HalveUyvy()` and the whole YUV path went with it — the sensor emits
+  RGB565 straight to the panel now.
 - ⬜ Behaviour, documented: face and expressions, head motion and the thinking pose, LED ring states,
   camera (on-screen, plus a description when a vision model is configured), wake word ("Hi, Stack
   Chan" — runs on the robot, not the server)
@@ -186,10 +193,17 @@ project proved the path end to end.
 - ⬜ 🔴 **Safety guidance.** Voice has no confirmation step, and speech recognition mishears. Recommend
   read-only tools by default and an explicit allowlist for anything that changes the world — a misheard
   sentence must not be able to unlock a door.
-- ⬜ 🔴 **Audit the upstream device tools the model can call.** The firmware compiles in, among others,
-  `self.upgrade_firmware` and `self.assets.set_download_url` (both fetch from a URL), `self.reboot`,
-  `self.screen.snapshot` and `self.screen.preview_image`. Decide which a voice-driven local robot should
-  expose, and remove or gate the rest.
+- ✅ 🔴 **Audit the upstream device tools the model can call.** Done, and the finding was that
+  upstream's "user only" marking is not a gate: it keeps a tool out of `tools/list`, and then
+  `DoToolCall` looks a tool up **by name** and runs it with no `user_only()` check anywhere. The
+  protection was that the name was not advertised — which protects nothing on a device whose only
+  input is a microphone with no confirmation step.
+
+  Removed from the build: `self.upgrade_firmware` (URL → download → flash → reboot),
+  `self.assets.set_download_url`, `self.screen.snapshot` (uploads a picture of the screen to a URL)
+  and `self.screen.preview_image` (fetches and displays a URL). Kept the read-only ones and
+  `self.reboot`. 18 tool names in the binary became 14, and `claims.ini` asserts the four stay out —
+  a subtree update would restore them and nothing else would notice.
 
 ## 4. Reproducibility ⬜
 

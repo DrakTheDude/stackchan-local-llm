@@ -29,6 +29,40 @@ Today every one of those is a constant or a config key, set independently, with 
 together. That is why the reference robot is currently wearing a night-shift-operator persona on
 firmware that knows nothing about it: the two halves have never been introduced.
 
+## What tokenising actually involves
+
+Counted from the source, not estimated. Every one of these is already named and grouped in the file
+its layer belongs to, which is why this is a gathering job rather than a redesign.
+
+**Look** — `stacky_face.cc`, 27 constants. Four colours (`kInk`, `kPupil`, `kGlint`, `kGlow`), the
+face box (`kFaceW/H`, `kFaceYOffset`), and the geometry that gives him his expression: `kEyeSpread`,
+`kEyeY`, `kBrowY`, `kBrowHalfW`, `kBrowThick`, `kMouthY`, `kStrokeW`.
+
+**Motion** — `stackchan_head.cc`, 12 constants. The glance targets (`kGlancePan`, `kGlanceTilt`), how
+fast he moves (`kGlanceMoveMinMs`, `kGlanceMoveJitterMs`) and how long he holds
+(`kGlanceHoldMinMs`, `kGlanceHoldJitterMs`). These *are* the "heavily caffeinated" example — that
+character is those six numbers.
+
+**Light** — `stackchan_leds.cc`. A named-colour table and the ring's resting behaviour.
+
+**Voice** and **Words** — server config, not firmware: `TTS.*.voice` and `prompt`.
+
+### Three things that will bite
+
+- 🔴 **Not everything is a scalar.** `kBlink[]` is a six-frame animation curve and `kGlancePan[]` /
+  `kGlanceTilt[]` are target lists. A character that only overrides numbers cannot change how he
+  blinks, which is one of the more expressive things on the list. The bundle needs to carry small
+  arrays, or the interesting half of "look" stays fixed.
+- ⚠️ **The geometry is derived, not absolute.** Face constants run through `Scaled()`
+  (`kScaleNum/kScaleDen`, currently 1.25×). Overriding a scaled value with a raw one silently changes
+  proportion as well as position. Whatever a character sets should go through the same scaling, or the
+  scaling should be resolved before the bundle is applied — not both.
+- ⚠️ **The two halves have never been introduced.** Look, motion and light are compiled in; voice and
+  words are server config. A character that sets all five has to cross that boundary, and today
+  nothing does. The simplest version is a character *name* the server knows and the firmware also
+  knows, with each side holding its own half — which keeps the firmware from having to be told about
+  prompts, and keeps the server from having to know about brow thickness.
+
 ## What a character actually is, concretely
 
 The useful test is whether an example writes itself. Take **"heavily caffeinated"**:

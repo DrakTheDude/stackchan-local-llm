@@ -100,8 +100,8 @@ control is the same size; it was attached to the wrong thing. [privacy.md](priva
 that replaced the old one.
 
 **3. The model and the person were looking at different pictures.** `Explain()` JPEG-encodes the raw
-sensor frame, which on this camera meters at **mean luma 31** in a lit room. The screen shows the
-output of the board's tone curve, which is why it looks fine to you. So the owner saw a lit room and
+sensor frame, which on this camera meters at **mean luma 31** in a lit room. The screen showed the
+output of the board's tone curve, which is why it looked fine to the owner. So the owner saw a lit room and
 the model said "a dark room", and both were describing what they were given. The board now hands the
 *prepared* frame to `Explain()`.
 
@@ -109,24 +109,59 @@ the model said "a dark room", and both were describing what they were given. The
 `{"success":true,"action":"RESPONSE","response":"..."}` — and passing the whole thing into the tool
 result put a robot one step away from speaking it. Only the sentence goes through now.
 
-## Still open: the picture itself
+## Settled: the picture
 
-Vision works and is fast. The **photograph** is not good — dark, desaturated, with dither visible in
-the blacks — and that is a capture problem rather than a vision one.
+The photograph was about three stops under for three days, and the reason it took three days is worth
+more than the fix.
 
-The cause is understood: exposure on this sensor is counted in row times, and the 320×240 mode's rows
-are half the length of the 640×480 mode's (`HB 0x32` against `0x6A`). At VGA the same exposure value
-collects twice the light, and averaging 2×2 back down to the panel's size would recover colour and
-noise as well.
+**Both levers worked the whole time.** Measured on a held scene with the sensor's auto-exposure
+genuinely disabled:
 
-⚠️ **And it cannot simply be switched on.** `VIDIOC_STREAMON` runs at init, so the sensor streams
-continuously from boot whether or not anyone wants a photo — 9.8 MB/s of DMA into PSRAM at VGA
-against 3.1 at QVGA. The wake-word engine shares that bus, and detection went spotty the moment VGA
-was enabled. It was reverted.
+| exposure (rows) | 240 | 480 | 740 | 1200 | 2000 | 3000 |
+|---|---|---|---|---|---|---|
+| **mean** | 27 | 30 | 34 | 41 | 51 | 60 |
 
-The fix is to stream only while taking a photo, which also removes the 3 MB/s the current setup burns
-permanently for a camera used seconds a day. Until that exists, the mode stays at QVGA and the
-picture stays dark.
+| gain (`0x50`) | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C |
+|---|---|---|---|---|---|---|
+| **mean** | 34 | 39 | 43 | 46 | 49 | 52 |
+
+🔴 **The output rises as roughly the cube root of the light** — that is the sensor ISP's gamma. Twelve
+times the exposure is barely twice the picture. So *every* single-register experiment reported "no
+visible change", and both levers were written off — gain explicitly, in a code comment, as measured
+noise. Correct by the cube and the metering loop converges in three steps; correct by a ratio and it
+creeps so slowly it looks like another dead lever.
+
+**Neither lever is enough alone.** Exposure alone tops out at mean 60, gain alone at 52, and a lit
+room wants about 100. It takes both — which is exactly why one-knob-at-a-time could never work.
+
+**Two register facts worth not relearning:**
+
+- The AEC enable is **bit 0 of `0x22`**, not bit 7 of `0xd2`. Clearing only `0xd2` left the sensor's
+  own loop running, pulling exposure back to 480 underneath every write — which is why exposure looked
+  like the dead lever and gain like the live one.
+- `0x50` is a **six-bit** field. An early sweep ran it to `0xFF`; more than half of that was out of
+  range, which produced both the "no ordering at all" result and four frames that came back dead.
+
+**The haze was the gamma, not the panel.** A frame three stops under has its bottom end stretched hard
+to be visible, which lifts the black floor and the noise with it — a grey veil over everything, in the
+file as well as on the screen. Before: black floor 24, nothing above 124. After: black floor 6, median
+71, p99 252. Fixing the exposure removed the veil from both at once, without touching the display.
+
+That retired a long list of suspects, none of which was ever the bug: byte order, a red/blue transpose,
+white balance, panel calibration, and the driver itself.
+
+⚠️ **It lands at both rails.** Mean 103 takes exposure at the 12-bit maximum *and* gain at the top of
+its field. Correct for a normally lit room, with no headroom for a darker one — and the long exposure
+means a moving subject will smear. The loop backs off correctly in brighter light.
+
+⚠️ **Do not re-test in isolation:** the AEC target (`0xd3`), horizontal blanking, or AWB gain writes.
+Any single register on its own is the trap this all came from.
+
+**Also disproved, so nobody repeats it:** the theory that QVGA was dark because its rows are half the
+length of VGA's, and that VGA would collect twice the light. VGA was tried and made the picture
+*darker* (mean 15 against 31) — the mode changes the PLL as well as the row length. Streaming is now
+bracketed per photo (`StartStreaming`/`StopStreaming`) rather than running from boot, which was a real
+problem and is fixed: at VGA the permanent 9.8 MB/s of DMA into PSRAM made wake-word detection spotty.
 
 ## Why this matters more than it looks
 

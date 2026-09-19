@@ -1822,7 +1822,7 @@ public:
                 //    part way through smears the frame. Released on every path
                 //    below, including the failures, or he would sit frozen.
                 // 📷 WAKE THE SENSOR. It is stopped the rest of the time - see
-                //    EspVideo::StartStreaming. The 400ms below, which the servos
+                //    Camera::StartStreaming. The 400ms below, which the servos
                 //    need anyway, doubles as its settle time, and Capture()
                 //    discards two frames before keeping one.
                 if (!camera_->StartStreaming()) {
@@ -1994,7 +1994,7 @@ public:
                         diag += rbuf;
                     }
                     // Already what the panel wants. Copy anyway: the preview
-                    // outlives this call and EspVideo reuses its frame buffer.
+                    // outlives this call and the driver reuses its frame buffer.
                     const size_t n = static_cast<size_t>(out_w) * out_h * 2;
                     rgb = static_cast<uint8_t*>(
                         heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
