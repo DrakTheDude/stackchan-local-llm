@@ -157,11 +157,17 @@ static const NamedShape kShapes[] = {
 // which a character does not reach yet.
 static int ScaledFor(int design_px) { return character::FaceLen(Scaled(design_px)); }
 
+// 🔑 THE CORNER RADIUS HAS ITS OWN UNIT, because squaring every corner with one
+//    number is what makes a period body read as that period - more than the
+//    palette does. Same panel scale and face_unit as everything else, then
+//    radius_unit on top.
+static int ScaledRadiusFor(int design_px) { return character::FaceRadius(Scaled(design_px)); }
+
 static StackyFace::FaceShape ScaleShape(const StackyFace::FaceShape& s) {
     auto eye = [](const StackyFace::EyeShape& e) {
         return StackyFace::EyeShape{
             static_cast<uint8_t>(ScaledFor(e.w)),        static_cast<uint8_t>(ScaledFor(e.h)),
-            static_cast<uint8_t>(ScaledFor(e.radius)),   static_cast<uint8_t>(ScaledFor(e.lid_top)),
+            static_cast<uint8_t>(ScaledRadiusFor(e.radius)), static_cast<uint8_t>(ScaledFor(e.lid_top)),
             static_cast<uint8_t>(ScaledFor(e.lid_bottom))};
     };
     auto brow = [](const StackyFace::BrowShape& b) {
@@ -221,7 +227,7 @@ lv_obj_t* StackyFace::MakeStroke(lv_obj_t* parent, int width_px) {
     lv_obj_t* line = lv_line_create(parent);
     lv_obj_set_size(line, kFaceW, kFaceH);
     lv_obj_center(line);
-    lv_obj_set_style_line_color(line, lv_color_hex(kInk), 0);
+    lv_obj_set_style_line_color(line, lv_color_hex(character::CurrentPalette().stroke), 0);
     lv_obj_set_style_line_width(line, width_px, 0);
     lv_obj_set_style_line_rounded(line, true, 0);
     return line;
@@ -236,11 +242,11 @@ void StackyFace::MakeEye(lv_obj_t* parent, Eye& eye, int centre_x) {
     lv_obj_remove_flag(eye.sclera, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_pad_all(eye.sclera, 0, 0);
     lv_obj_set_style_border_width(eye.sclera, 0, 0);
-    lv_obj_set_style_bg_color(eye.sclera, lv_color_hex(kInk), 0);
+    lv_obj_set_style_bg_color(eye.sclera, lv_color_hex(character::CurrentPalette().sclera), 0);
     lv_obj_set_style_bg_opa(eye.sclera, LV_OPA_COVER, 0);
     // The bloom - a blurred violet shadow with no offset. This is where the
     // accent colour lives, and it costs one style property.
-    lv_obj_set_style_shadow_color(eye.sclera, lv_color_hex(kGlow), 0);
+    lv_obj_set_style_shadow_color(eye.sclera, lv_color_hex(character::CurrentPalette().glow), 0);
     lv_obj_set_style_shadow_width(eye.sclera, 22, 0);
     lv_obj_set_style_shadow_spread(eye.sclera, 1, 0);
     lv_obj_set_style_shadow_offset_x(eye.sclera, 0, 0);
@@ -257,18 +263,18 @@ void StackyFace::MakeEye(lv_obj_t* parent, Eye& eye, int centre_x) {
     lv_obj_remove_flag(eye.pupil, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(eye.pupil, 0, 0);
     lv_obj_set_style_border_width(eye.pupil, 0, 0);
-    lv_obj_set_style_bg_color(eye.pupil, lv_color_hex(kPupil), 0);
+    lv_obj_set_style_bg_color(eye.pupil, lv_color_hex(character::CurrentPalette().pupil), 0);
     lv_obj_set_style_bg_opa(eye.pupil, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(eye.pupil, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(eye.pupil, character::CurrentLook().radius_unit > 0.0f ? LV_RADIUS_CIRCLE : 0, 0);
 
     // The catchlight. Two-thirds of "alive" for six pixels.
     eye.glint = lv_obj_create(eye.pupil);
     lv_obj_remove_flag(eye.glint, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(eye.glint, 0, 0);
     lv_obj_set_style_border_width(eye.glint, 0, 0);
-    lv_obj_set_style_bg_color(eye.glint, lv_color_hex(kGlint), 0);
+    lv_obj_set_style_bg_color(eye.glint, lv_color_hex(character::CurrentPalette().glint), 0);
     lv_obj_set_style_bg_opa(eye.glint, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(eye.glint, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(eye.glint, character::CurrentLook().radius_unit > 0.0f ? LV_RADIUS_CIRCLE : 0, 0);
     lv_obj_set_size(eye.glint, 7, 7);
     lv_obj_align(eye.glint, LV_ALIGN_TOP_LEFT, 3, 3);
 
@@ -352,7 +358,7 @@ void StackyFace::BuildFace() {
     lv_obj_set_style_pad_all(mouth_ring_, 0, 0);
     lv_obj_set_style_bg_color(mouth_ring_, theme->background_color(), 0);
     lv_obj_set_style_bg_opa(mouth_ring_, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(mouth_ring_, lv_color_hex(kInk), 0);
+    lv_obj_set_style_border_color(mouth_ring_, lv_color_hex(character::CurrentPalette().stroke), 0);
     lv_obj_set_style_border_width(mouth_ring_, kStrokeW - 1, 0);
     lv_obj_set_style_radius(mouth_ring_, LV_RADIUS_CIRCLE, 0);
     lv_obj_align(mouth_ring_, LV_ALIGN_CENTER, 0, kMouthY);
@@ -458,7 +464,7 @@ void StackyFace::BuildScreensaver() {
     lv_obj_set_style_pad_all(card, 18, 0);
     lv_obj_set_style_bg_color(card, lv_color_hex(kCardBg), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(card, lv_color_hex(kGlow), 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(character::CurrentPalette().glow), 0);
     lv_obj_set_style_border_width(card, 1, 0);
     lv_obj_set_style_border_opa(card, LV_OPA_50, 0);
 
@@ -489,7 +495,7 @@ void StackyFace::BuildScreensaver() {
     lv_obj_align(saver_dot_, LV_ALIGN_TOP_RIGHT, 0, 6);
 
     saver_value_ = lv_label_create(card);
-    lv_obj_set_style_text_color(saver_value_, lv_color_hex(kInk), 0);
+    lv_obj_set_style_text_color(saver_value_, lv_color_hex(character::CurrentPalette().stroke), 0);
     lv_obj_set_style_text_align(saver_value_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(saver_value_, LV_ALIGN_CENTER, 0, -6);
     lv_label_set_text(saver_value_, "");
@@ -503,7 +509,7 @@ void StackyFace::BuildScreensaver() {
     lv_obj_set_style_bg_color(saver_bar_, lv_color_hex(0x241A3A), 0);
     lv_obj_set_style_bg_opa(saver_bar_, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(saver_bar_, 4, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(saver_bar_, lv_color_hex(kGlow), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(saver_bar_, lv_color_hex(character::CurrentPalette().glow), LV_PART_INDICATOR);
     lv_bar_set_range(saver_bar_, 0, 100);
 
     saver_sub_ = lv_label_create(card);
@@ -849,6 +855,45 @@ void StackyFace::ApplyMouth(int w, int curve, int open_h) {
     last_mouth_w_ = w;
     last_mouth_curve_ = curve;
     last_mouth_open_ = open_h;
+}
+
+// 🎨 THE BODY CHANGED. Re-colour what exists rather than rebuilding it: LVGL
+//    object lifetime around a running animation timer is the kind of thing that
+//    survives testing and fails on the third switch.
+//
+// ⚠️ Runs from the LVGL task with the lock already held, like Tick() - the menu
+//    row that calls it is an LVGL event callback.
+void StackyFace::Repaint() {
+    const auto& p = character::CurrentPalette();
+
+    auto eye = [&p](Eye& e) {
+        if (e.sclera != nullptr) {
+            lv_obj_set_style_bg_color(e.sclera, lv_color_hex(p.sclera), 0);
+            lv_obj_set_style_shadow_color(e.sclera, lv_color_hex(p.glow), 0);
+        }
+        if (e.pupil != nullptr) lv_obj_set_style_bg_color(e.pupil, lv_color_hex(p.pupil), 0);
+        if (e.glint != nullptr) lv_obj_set_style_bg_color(e.glint, lv_color_hex(p.glint), 0);
+        // The lids are painted in the GROUND colour - they work by hiding the
+        // sclera, so on a white body they have to be white too or they read as
+        // bars across his eyes.
+        if (e.lid_top != nullptr) lv_obj_set_style_bg_color(e.lid_top, lv_color_hex(p.ground), 0);
+        if (e.lid_bottom != nullptr) {
+            lv_obj_set_style_bg_color(e.lid_bottom, lv_color_hex(p.ground), 0);
+        }
+    };
+    eye(left_);
+    eye(right_);
+
+    if (brow_l_ != nullptr) lv_obj_set_style_line_color(brow_l_, lv_color_hex(p.stroke), 0);
+    if (brow_r_ != nullptr) lv_obj_set_style_line_color(brow_r_, lv_color_hex(p.stroke), 0);
+    if (mouth_line_ != nullptr) {
+        lv_obj_set_style_line_color(mouth_line_, lv_color_hex(p.stroke), 0);
+    }
+    if (mouth_ring_ != nullptr) {
+        lv_obj_set_style_border_color(mouth_ring_, lv_color_hex(p.stroke), 0);
+        lv_obj_set_style_bg_color(mouth_ring_, lv_color_hex(p.ground), 0);
+    }
+    if (face_ != nullptr) lv_obj_set_style_bg_color(face_, lv_color_hex(p.ground), 0);
 }
 
 void StackyFace::Tick() {

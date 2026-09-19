@@ -162,6 +162,11 @@ public:
         uint8_t mouth_open;   // 0 = use the line; else the ring's height
     };
 
+    // 🎨 Re-apply the body's palette to widgets that already exist. Without it a
+    //    new body only appears after a reboot, which reads as the setting not
+    //    working. Called from the settings row, i.e. inside the LVGL task.
+    void Repaint();
+
 private:
     enum class Mode { kIdle, kListening, kThinking, kSpeaking };
 
@@ -210,6 +215,7 @@ private:
     // Runs as an lv_timer, i.e. INSIDE the LVGL task, which already holds the
     // port lock. Do not take DisplayLockGuard here - see anim_timer_ below.
     void Tick();
+
     void ApplyEye(const Eye& eye, const EyeShape& s, int open_pct, int gx, int gy,
                   EyeState& cache);
     void ApplyBrows(const BrowShape& l, const BrowShape& r);

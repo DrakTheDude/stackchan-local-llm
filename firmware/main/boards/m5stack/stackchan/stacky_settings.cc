@@ -98,11 +98,11 @@ lv_obj_t* StackySettings::AddRow(const char* text, lv_event_cb_t cb) {
 // The row's label is its first child - see AddRow, which creates exactly one.
 // Kept here rather than inline so that assumption lives next to the code that
 // makes it true.
-void StackySettings::SetCharacterLabel(const char* label) {
-    if (character_row_ == nullptr || label == nullptr) return;
-    lv_obj_t* text = lv_obj_get_child(character_row_, 0);
+void StackySettings::SetRowLabel(lv_obj_t* row, const char* prefix, const char* label) {
+    if (row == nullptr || label == nullptr) return;
+    lv_obj_t* text = lv_obj_get_child(row, 0);
     if (text != nullptr) {
-        lv_label_set_text_fmt(text, "Character: %s", label);
+        lv_label_set_text_fmt(text, "%s: %s", prefix, label);
     }
 }
 
@@ -280,14 +280,19 @@ void StackySettings::BuildList() {
     //    so which character is in force is readable without opening anything -
     //    the two halves of a character can drift, and being able to see what
     //    this half thinks it is wearing is how anybody notices.
-    character_row_ = AddRow("Character", [](lv_event_t* e) {
+    body_row_ = AddRow("Body", [](lv_event_t* e) {
         auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
-        if (!self->actions_.next_character) return;
-        self->SetCharacterLabel(self->actions_.next_character());
+        if (!self->actions_.next_body) return;
+        self->SetRowLabel(self->body_row_, "Body", self->actions_.next_body());
     });
-    if (actions_.character_label) {
-        SetCharacterLabel(actions_.character_label());
-    }
+    if (actions_.body_label) SetRowLabel(body_row_, "Body", actions_.body_label());
+
+    mood_row_ = AddRow("Mood", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        if (!self->actions_.next_mood) return;
+        self->SetRowLabel(self->mood_row_, "Mood", self->actions_.next_mood());
+    });
+    if (actions_.mood_label) SetRowLabel(mood_row_, "Mood", actions_.mood_label());
 
     AddRow("Motion check", [](lv_event_t* e) {
         auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));

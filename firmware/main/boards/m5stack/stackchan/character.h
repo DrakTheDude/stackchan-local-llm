@@ -45,10 +45,37 @@ constexpr float kMaxTiltDeg = 20.0f;  // inside its +/-35
 //    space as the expression table, never in screen pixels - authoring in screen
 //    pixels is resolving at authoring time, and it would make this token
 //    impossible to express.
+// 🎨 THE FACE'S OWN INK. Kept here rather than in the LVGL theme because these
+//    are the cartoon's values, not the UI's - a sclera and a pupil are legible
+//    because of the VALUE STEP between them, and that relationship has to hold
+//    whatever the surrounding theme does.
+struct Palette {
+    // 🔴 SCLERA AND STROKE ARE SEPARATE, and they were one token until a light
+    //    body proved they could not be. The sclera has to contrast with the
+    //    PUPIL; the brows and mouth have to contrast with the GROUND. On a dark
+    //    body both answers are "light" and the conflict is invisible - which is
+    //    why the first light body came out with black eyes and white pupils.
+    uint32_t sclera;  // the eye's field
+    uint32_t stroke;  // brows and mouth, drawn against the ground
+    uint32_t pupil;   // the value step against the sclera is what makes an eye read
+    uint32_t glint;
+    uint32_t glow;    // the accent, kept as a bloom rather than as a feature
+    uint32_t ground;  // what the face is drawn on, and the screen behind it
+
+    // The UI half. A body is the whole robot, so the chat text and panels come
+    // with it - a face repainted onto somebody else's furniture is half a body.
+    uint32_t text;
+    uint32_t panel;   // assistant bubbles, cards
+};
+
 struct Look {
     // Multiplies the whole face's geometry on top of the panel scale. 0.85 is a
     // smaller, more compact face; 1.1 is a broader one.
     float face_unit = 1.0f;
+    // 🔑 SQUARE EVERYTHING WITH ONE NUMBER. FaceShape carries a per-eye radius,
+    //    so 0 gives hard corners and 1 leaves them as drawn. This is the whole
+    //    of a period identity - more of it than the palette is.
+    float radius_unit = 1.0f;
 };
 
 // 📏 BOTH BOUNDS ARE MEASURED, not guessed - three builds, three captures off
@@ -75,6 +102,14 @@ inline Look& CurrentLook() {
 inline int FaceLen(int design_px) {
     const float u = std::clamp(CurrentLook().face_unit, kMinFaceUnit, kMaxFaceUnit);
     return static_cast<int>(std::lround(design_px * u));
+}
+
+// A corner radius, through the body. Clamped at 0 because a negative radius is
+// not a shape, and at the drawn value because a rounder-than-round eye is a
+// circle with a different bug.
+inline int FaceRadius(int design_px) {
+    const float u = std::clamp(CurrentLook().radius_unit, 0.0f, 1.0f);
+    return static_cast<int>(std::lround(FaceLen(design_px) * u));
 }
 
 struct Motion {
@@ -129,86 +164,113 @@ inline float TiltDeg(float base_deg) {
 }
 
 
-// 🎭 A CHARACTER: the whole bundle, under one name.
+// 🎭 A BODY: who he is. 🌡️ A MOOD: how he is right now.
 //
-//    Look and motion together is the entire point - "heavily caffeinated" is not
-//    a palette and it is not a speed, it is both at once, and a bundle that only
-//    carried one half would need two edits to be anybody.
+// 🔴 THESE ARE TWO AXES AND THE FIRST VERSION OF THIS FILE HAD THEM AS ONE.
 //
-//    The server's half (voice, persona) is NOT here and must not be. Firmware
-//    never learns what a prompt is; the server never learns about brow
-//    thickness. The NAME is the only thing both sides share.
-struct Character {
-    const char* id;      // what is stored in NVS and shared with the server
-    const char* label;   // what the settings menu shows
+//    "Caffeinated Stacky is still Stacky - he just moves and talks fast."
+//
+//    Caffeinated and droopy modulate a robot; they do not replace him. A System
+//    7 body IS a different robot - squared eyes, a white ground, a robot voice,
+//    a grumpy desktop persona. Putting both on one list made "caffeinated
+//    Classic" a contradiction, when it is obviously a thing somebody would want
+//    to be.
+//
+//    The server's half of a BODY - voice and persona - is not here and must not
+//    be. The id is the only thing both sides share.
+struct Body {
+    const char* id;
+    const char* label;
+    Palette palette;
     Look look;
+};
+
+struct Mood {
+    const char* id;
+    const char* label;
     Motion motion;
 };
 
-// 🔴 THE TABLE IS THE REGISTRY. No parallel list of names exists anywhere, and
-//    none should: two sources drift the moment somebody adds a character and
-//    forgets the other, which costs an afternoon the first time a new entry
-//    silently does not appear in the menu.
-//
-// ⚠️ EVERY VALUE HERE IS INSIDE THE CLAMPS ON PURPOSE. The clamps exist because
-//    a character will one day arrive from a file or a network message; the
-//    built-ins should not be the reason anybody learns that.
-inline constexpr Character kCharacters[] = {
-    // The robot as he has always been. Every unit at 1.0, which makes the
-    // arithmetic an identity - this entry must never change behaviour.
-    {"default", "Default",
-     Look{1.00f}, Motion{1.00f, 1.00f}},
+// 🔒 THE DEFAULT BODY IS LOCKED. This is the robot as he is, and every number in
+//    it is load-bearing: the ink is inverted for a black screen, the pupil is
+//    near-black rather than pure so it still reads, and the glow is an accent
+//    kept as a bloom. Changing any of it changes every robot nobody has touched.
+inline constexpr Body kBodies[] = {
+    {"drax", "Drax",
+     Palette{0xF2FAFF, 0xF2FAFF, 0x07080E, 0xFFFFFF, 0xA855FF, 0x000000,
+             0xC9A9FF, 0x1A1430},
+     Look{1.00f, 1.00f}},
 
-    // Quick, and looks further. Shorter durations, wider glances, eyes a little
-    // larger - the example the design note is written around.
-    {"caffeinated", "Caffeinated",
-     Look{1.08f}, Motion{0.55f, 1.35f}},
-
-    // Slow side to side, barely turning his head. Not a new animation: the same
-    // glance behaviour with a long duration and a small amplitude, which is the
-    // test of whether these tokens carry enough.
-    {"fivebell", "Five in the morning",
-     Look{0.88f}, Motion{2.20f, 0.40f}},
-
-    // 📐 THE INSTRUMENT, and it is NOT a look. It exists to be applied during
-    //    testing so you can see WHAT CHANGED - anything that does not move is
-    //    hardcoded. Everything is at a bound, deliberately: a subtle instrument
-    //    hides exactly the failures it is meant to find.
+    // 🖥️ A DIFFERENT ROBOT, not a repainted one. Dark ink on a white ground and
+    //    every corner square - the period identity is the geometry more than the
+    //    palette, which is why radius_unit leads here.
     //
-    //    Run it with the Motion check row and watch the square.
-    {"testpattern", "Test pattern (instrument)",
-     Look{kMaxFaceUnit}, Motion{0.35f, 2.50f}},
+    //    Its voice and persona live on the server under this same id.
+    {"classic", "Classic",
+     Palette{0xFFFFFF, 0x0A0A0A, 0x111111, 0xFFFFFF, 0x808080, 0xE8E8E8,
+             0x111111, 0xCFCFCF},
+     Look{1.00f, 0.00f}},
 };
 
-inline constexpr int kCharacterCount =
-    sizeof(kCharacters) / sizeof(kCharacters[0]);
+inline constexpr Mood kMoods[] = {
+    {"steady", "Steady", Motion{1.00f, 1.00f}},
+    {"caffeinated", "Caffeinated", Motion{0.55f, 1.35f}},
+    // 📐 These two ARE the instrument. Caffeinated and Five in the morning sit
+    //    far enough apart that switching between them shows what is wired and
+    //    what is not - a third entry existing only to be extreme would be one
+    //    more thing to scroll past.
+    {"fivebell", "Five in the morning", Motion{2.20f, 0.40f}},
+};
 
-// The one in force. Held by id so the About page and the server can both say
-// which character each half thinks it is wearing - a drift somebody has to be
-// able to see from across the room.
-inline const char*& CurrentId() {
-    static const char* id = kCharacters[0].id;
+inline constexpr int kBodyCount = sizeof(kBodies) / sizeof(kBodies[0]);
+inline constexpr int kMoodCount = sizeof(kMoods) / sizeof(kMoods[0]);
+
+inline Palette& CurrentPalette() {
+    static Palette p = kBodies[0].palette;
+    return p;
+}
+
+inline const char*& CurrentBodyId() {
+    static const char* id = kBodies[0].id;
     return id;
 }
 
-// Apply a bundle. Takes a Character rather than an index, so the server override
-// in stage 2 needs no new path - it builds one and calls this.
-inline void Apply(const Character& c) {
-    CurrentLook() = c.look;
-    CurrentMotion() = c.motion;
-    CurrentId() = c.id;
+inline const char*& CurrentMoodId() {
+    static const char* id = kMoods[0].id;
+    return id;
 }
 
-// Returns nullptr for an unknown id, which is the honest answer: an id stored by
-// an older build, or sent by a server that knows a character this firmware does
-// not, should fall back to the default rather than guess at a near match.
-inline const Character* Find(const char* id) {
-    if (id == nullptr) return nullptr;
-    for (const auto& c : kCharacters) {
-        const char* a = c.id;
-        const char* b = id;
-        while (*a != '\0' && *a == *b) { ++a; ++b; }
-        if (*a == '\0' && *b == '\0') return &c;
+// Applied separately, because they are separate axes - changing your mood must
+// not repaint you.
+inline void ApplyBody(const Body& b) {
+    CurrentPalette() = b.palette;
+    CurrentLook() = b.look;
+    CurrentBodyId() = b.id;
+}
+
+inline void ApplyMood(const Mood& m) {
+    CurrentMotion() = m.motion;
+    CurrentMoodId() = m.id;
+}
+
+inline bool SameId(const char* a, const char* b) {
+    if (a == nullptr || b == nullptr) return false;
+    while (*a != '\0' && *a == *b) { ++a; ++b; }
+    return *a == '\0' && *b == '\0';
+}
+
+// nullptr for an unknown id: an id from an older build, or one a server knows
+// and this firmware does not, falls back rather than guessing at a near match.
+inline const Body* FindBody(const char* id) {
+    for (const auto& b : kBodies) {
+        if (SameId(b.id, id)) return &b;
+    }
+    return nullptr;
+}
+
+inline const Mood* FindMood(const char* id) {
+    for (const auto& m : kMoods) {
+        if (SameId(m.id, id)) return &m;
     }
     return nullptr;
 }

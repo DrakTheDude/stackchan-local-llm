@@ -786,39 +786,75 @@ private:
         face_->SetNoServer(unset);
     }
 
-    // 🎭 THE CHARACTER IN FORCE. Stored by id, not by index: an index shifts
-    //    the moment somebody inserts a character into the table, and the robot
-    //    would quietly come back as somebody else.
+    // 🎭 WHO HE IS, and 🌡️ HOW HE IS. Two axes, two NVS keys, stepped
+    //    separately - changing a mood must not repaint him, and changing a body
+    //    must not make him hurry.
+    //
+    //    Stored by id, never by index: an index shifts the moment somebody
+    //    inserts a row, and the robot comes back as somebody else.
     void LoadCharacter() {
         Settings settings("stackchan", false);
-        const std::string id = settings.GetString("character", "default");
-        const auto* c = character::Find(id.c_str());
-        if (c == nullptr) {
-            // An id from a newer build, or a typo. The default is the honest
-            // answer - guessing at a near match would be worse than resetting.
-            ESP_LOGW(TAG, "unknown character '%s' - falling back to default", id.c_str());
-            c = &character::kCharacters[0];
+
+        const std::string body_id = settings.GetString("body", "drax");
+        const auto* body = character::FindBody(body_id.c_str());
+        if (body == nullptr) {
+            ESP_LOGW(TAG, "unknown body '%s' - falling back", body_id.c_str());
+            body = &character::kBodies[0];
         }
-        character::Apply(*c);
-        ESP_LOGI(TAG, "character: %s", c->label);
+        character::ApplyBody(*body);
+
+        const std::string mood_id = settings.GetString("mood", "steady");
+        const auto* mood = character::FindMood(mood_id.c_str());
+        if (mood == nullptr) {
+            ESP_LOGW(TAG, "unknown mood '%s' - falling back", mood_id.c_str());
+            mood = &character::kMoods[0];
+        }
+        character::ApplyMood(*mood);
+
+        ESP_LOGI(TAG, "body: %s, mood: %s", body->label, mood->label);
     }
 
-    // Steps to the next character, persists it, and returns its label for the
-    // menu row. Wraps, so four taps come back to where it started.
-    const char* NextCharacter() {
+    const char* NextBody() {
         int index = 0;
-        for (int i = 0; i < character::kCharacterCount; i++) {
-            if (character::kCharacters[i].id == character::CurrentId()) {
+        for (int i = 0; i < character::kBodyCount; i++) {
+            if (character::SameId(character::kBodies[i].id, character::CurrentBodyId())) {
                 index = i;
                 break;
             }
         }
-        const auto& next =
-            character::kCharacters[(index + 1) % character::kCharacterCount];
-        character::Apply(next);
+        const auto& next = character::kBodies[(index + 1) % character::kBodyCount];
+        character::ApplyBody(next);
         Settings settings("stackchan", true);
-        settings.SetString("character", next.id);
-        ESP_LOGI(TAG, "character -> %s", next.label);
+        settings.SetString("body", next.id);
+        ESP_LOGI(TAG, "body -> %s", next.label);
+        // ⚠️ The palette is read when the face builds its widgets, so a body
+        //    change needs the face rebuilt to be seen. Until that exists, the
+        //    honest thing is to say so rather than to look broken.
+        // The theme first - it restyles live objects and owns the ground the face
+        // is drawn on - then the face, which sits on top of it.
+        InitializeTheme();
+        if (display_ != nullptr) {
+            display_->SetTheme(LvglThemeManager::GetInstance().GetTheme("dark"));
+        }
+        if (face_ != nullptr) {
+            face_->Repaint();
+        }
+        return next.label;
+    }
+
+    const char* NextMood() {
+        int index = 0;
+        for (int i = 0; i < character::kMoodCount; i++) {
+            if (character::SameId(character::kMoods[i].id, character::CurrentMoodId())) {
+                index = i;
+                break;
+            }
+        }
+        const auto& next = character::kMoods[(index + 1) % character::kMoodCount];
+        character::ApplyMood(next);
+        Settings settings("stackchan", true);
+        settings.SetString("mood", next.id);
+        ESP_LOGI(TAG, "mood -> %s", next.label);
         return next.label;
     }
 
@@ -858,10 +894,15 @@ private:
         StackySettings::Actions a;
         a.wifi_setup = [this]() { EnterWifiConfigMode(); };
         a.motion_check = [this]() { head_.TraceSquare(); };
-        a.next_character = [this]() { return NextCharacter(); };
-        a.character_label = []() {
-            const auto* c = character::Find(character::CurrentId());
-            return c != nullptr ? c->label : character::kCharacters[0].label;
+        a.next_body = [this]() { return NextBody(); };
+        a.body_label = []() {
+            const auto* b = character::FindBody(character::CurrentBodyId());
+            return b != nullptr ? b->label : character::kBodies[0].label;
+        };
+        a.next_mood = [this]() { return NextMood(); };
+        a.mood_label = []() {
+            const auto* m = character::FindMood(character::CurrentMoodId());
+            return m != nullptr ? m->label : character::kMoods[0].label;
         };
         a.self_check = [this]() {
             // The same check the boot chime reports, on demand - which is what
@@ -1091,16 +1132,25 @@ private:
             ESP_LOGW(TAG, "no dark theme registered; leaving the stock look alone");
             return;
         }
-        theme->set_background_color(lv_color_hex(0x000000));
-        theme->set_chat_background_color(lv_color_hex(0x000000));
-        theme->set_text_color(lv_color_hex(0xC9A9FF));         // lavender
-        theme->set_system_text_color(lv_color_hex(0x98A2B3));  // muted grey
-        theme->set_assistant_bubble_color(lv_color_hex(0x1A1430));
-        theme->set_user_bubble_color(lv_color_hex(0x5933AB));  // deep purple
-        theme->set_system_bubble_color(lv_color_hex(0x000000));
-        theme->set_border_color(lv_color_hex(0xA17EFF));       // saturated purple
-        theme->set_low_battery_color(lv_color_hex(0xFF8E8E));  // soft red
-        ESP_LOGI(TAG, "theme applied: black + lavender");
+        // 🎭 THE BODY'S COLOURS, not a hardcoded set. Applying a body has to
+        //    reach the screen behind the face as well as the face itself - a
+        //    Classic robot drawn in dark ink on a black ground is two black
+        //    boxes with white pupils, which is exactly what the first capture
+        //    showed.
+        const auto& p = character::CurrentPalette();
+        theme->set_background_color(lv_color_hex(p.ground));
+        theme->set_chat_background_color(lv_color_hex(p.ground));
+        theme->set_text_color(lv_color_hex(p.text));
+        theme->set_system_text_color(lv_color_hex(p.glow));
+        theme->set_assistant_bubble_color(lv_color_hex(p.panel));
+        theme->set_user_bubble_color(lv_color_hex(p.glow));
+        theme->set_system_bubble_color(lv_color_hex(p.ground));
+        theme->set_border_color(lv_color_hex(p.glow));
+        // 🔑 SEMANTIC, NOT BRAND. Severity does not live with the accent: a body
+        //    that wants a different accent almost never wants a different
+        //    meaning for "your battery is nearly flat". Soft red on every body.
+        theme->set_low_battery_color(lv_color_hex(0xFF8E8E));
+        ESP_LOGI(TAG, "theme applied for body: %s", character::CurrentBodyId());
     }
 
     // 🔴 BOOT CRASH FIX. Wait until a VSYNC pulse has just gone by before
