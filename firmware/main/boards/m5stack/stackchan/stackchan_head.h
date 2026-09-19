@@ -80,6 +80,15 @@ public:
     // the model last asked the head to do.
     void Startle();
 
+    // 📐 THE MOTION INSTRUMENT. Traces a square and returns to centre, through
+    //    the character tokens like every other movement - so a character that
+    //    changes speed or amplitude visibly changes the square, and one that
+    //    does not has told you its tokens reach nothing.
+    //
+    //    Not a gesture. Nothing calls this during a conversation; it exists to
+    //    be run from the settings menu while somebody watches.
+    void TraceSquare();
+
     // He is working on a reply, and there is no device state that says so - the
     // device sits in LISTENING from the moment you stop talking until the first
     // audio arrives, which on a 32B is regularly five to ten seconds. The face
@@ -120,6 +129,9 @@ private:
     // aligned int, set to a value the reader only ever counts up from - no lock
     // buys anything here, and taking one on the main task would.
     volatile int startle_stage_ = 0;
+    // Same aligned-word treatment as startle_stage_: written from the LVGL task
+    // when somebody presses the row, read by the head task.
+    volatile int square_stage_ = 0;
     volatile bool thinking_ = false;
     volatile bool hold_still_ = false;
     int think_stage_ = -1;      // -1 = not in the thinking script

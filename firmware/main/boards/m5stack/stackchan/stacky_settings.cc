@@ -265,6 +265,11 @@ void StackySettings::BuildList() {
         if (self->actions_.self_check) self->actions_.self_check();
     });
 
+    AddRow("Motion check", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        if (self->actions_.motion_check) self->actions_.motion_check();
+    });
+
     AddRow("About", [](lv_event_t* e) {
         auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
         self->FillAbout();

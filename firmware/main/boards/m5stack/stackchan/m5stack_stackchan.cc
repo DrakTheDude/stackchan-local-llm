@@ -820,6 +820,7 @@ private:
     StackySettings::Actions MakeSettingsActions() {
         StackySettings::Actions a;
         a.wifi_setup = [this]() { EnterWifiConfigMode(); };
+        a.motion_check = [this]() { head_.TraceSquare(); };
         a.self_check = [this]() {
             // The same check the boot chime reports, on demand - which is what
             // the factory firmware's "Hardware Test" was for. It takes seconds

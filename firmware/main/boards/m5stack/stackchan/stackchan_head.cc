@@ -148,6 +148,11 @@ void StackChanHead::Startle() {
     startle_stage_ = 1;
 }
 
+void StackChanHead::TraceSquare() {
+    if (!ready_) return;
+    square_stage_ = 1;
+}
+
 void StackChanHead::SuperviseRail() {
     if (!rail_check_) return;
     if (--rail_countdown_ > 0) return;
@@ -203,6 +208,30 @@ int StackChanHead::MotionStep() {
     // move's own duration, so the next stage starts from a settled position.
     // A servo re-commanded mid-travel just changes target, and a double-take
     // written that way collapses into one vague sweep.
+    // 📐 The instrument. Corners are deliberately round numbers: a square that
+    //    comes back lopsided means a corner is coming from somewhere the tokens
+    //    do not reach, and lopsided is the one fault a person spots instantly.
+    if (square_stage_ > 0) {
+        last_state_ = -1;   // whatever mode follows is a fresh transition
+        const int stage = square_stage_;
+        square_stage_ = stage + 1;
+        constexpr float kSidePan = 25.0f;
+        constexpr float kSideTilt = 12.0f;
+        constexpr int kSideMs = 500;
+        const uint16_t ms = character::MoveMs(kSideMs);
+        const int wait = character::IntervalMs(kSideMs + 120);
+        switch (stage) {
+            case 1: SetAngles(character::PanDeg(-kSidePan), character::TiltDeg(kSideTilt), ms);  return wait;
+            case 2: SetAngles(character::PanDeg( kSidePan), character::TiltDeg(kSideTilt), ms);  return wait;
+            case 3: SetAngles(character::PanDeg( kSidePan), character::TiltDeg(-kSideTilt), ms); return wait;
+            case 4: SetAngles(character::PanDeg(-kSidePan), character::TiltDeg(-kSideTilt), ms); return wait;
+            // Close it where it started, so an accumulating error shows as a gap.
+            case 5: SetAngles(character::PanDeg(-kSidePan), character::TiltDeg(kSideTilt), ms);  return wait;
+            case 6: SetAngles(character::PanDeg(0.0f), character::TiltDeg(0.0f), ms);            return wait;
+            default: square_stage_ = 0; return kPollMs;
+        }
+    }
+
     if (startle_stage_ > 0) {
         // Whatever mode he is in, treat it as new once this finishes, so the
         // resting pose is re-commanded rather than assumed still to hold.

@@ -35,6 +35,9 @@ public:
     struct Actions {
         std::function<void()> wifi_setup;
         std::function<void()> self_check;
+        // 📐 Traces a square with the head, so a character's motion tokens can
+        //    be SEEN. See StackChanHead::TraceSquare.
+        std::function<void()> motion_check;
         std::function<void(int)> set_volume;      // 0..100
         std::function<int()> get_volume;
         std::function<void(int)> set_brightness;  // 0..100
