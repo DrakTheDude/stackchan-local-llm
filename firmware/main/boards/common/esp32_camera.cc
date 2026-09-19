@@ -56,6 +56,18 @@ void Esp32Camera::SetExplainUrl(const std::string &url, const std::string &token
     explain_token_ = token;
 }
 
+// No <linux/videodev2.h> here: the fourccs are already in scope through this
+// file s existing includes, and a second copy redefines every one of them.
+uint32_t Esp32Camera::frame_format() const {
+    if (current_fb_ == nullptr) return 0;
+    switch (current_fb_->format) {
+        case PIXFORMAT_RGB565: return V4L2_PIX_FMT_RGB565;
+        case PIXFORMAT_YUV422: return V4L2_PIX_FMT_YUYV;
+        case PIXFORMAT_GRAYSCALE: return V4L2_PIX_FMT_GREY;
+        default: return 0;
+    }
+}
+
 bool Esp32Camera::Capture() {
     if (encoder_thread_.joinable()) {
         encoder_thread_.join();
@@ -107,8 +119,13 @@ bool Esp32Camera::Capture() {
             memcpy(encode_buf_, current_fb_->buf, data_size);
         }
 
-        // Allocate separate buffer for preview display
-        uint8_t *preview_data = (uint8_t *)heap_caps_malloc(data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        // 📷 The board may want to draw the picture itself - see
+        //    SetAutoPreview. Ours does: it centres the head, converts the frame
+        //    and fills the screen rather than showing a half-size stamp, so
+        //    leaving this on would put two pictures up per photograph.
+        uint8_t *preview_data = auto_preview_
+            ? (uint8_t *)heap_caps_malloc(data_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+            : nullptr;
         if (preview_data != nullptr) {
             memcpy(preview_data, encode_buf_, data_size);
             auto display = dynamic_cast<LvglDisplay *>(Board::GetInstance().GetDisplay());

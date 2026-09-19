@@ -13,11 +13,6 @@
 #include "esp_video_init.h"
 #include "jpg/image_to_jpeg.h"
 
-struct JpegChunk {
-    uint8_t* data;
-    size_t len;
-};
-
 class EspVideo : public Camera {
 private:
     struct FrameBuffer {

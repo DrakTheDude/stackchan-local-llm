@@ -26,7 +26,11 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_ili9341.h>
 #include <esp_timer.h>
+// ⚠️ KEPT FOR THE V4L2_PIX_FMT_* CONSTANTS ONLY. The esp_video driver itself
+//    is no longer built into this board - see InitializeCamera - but the frame
+//    format the camera reports is still compared against these fourccs.
 #include "esp_video.h"
+#include "esp32_camera.h"
 #include "mcp_server.h"
 #include "lvgl_display/lvgl_image.h"
 #include "lvgl_display/lvgl_theme.h"
@@ -35,6 +39,7 @@
 // V4L2_PIX_FMT_* constant - which is a hard error under -Werror.
 
 #define TAG "M5StackStackChanBoard"
+
 
 class Pmic : public Axp2101 {
 public:
@@ -177,16 +182,27 @@ private:
 namespace gc0308 {
 
 constexpr uint8_t kAddr = 0x21;
-// The AEC drives towards 72 and the sensor's own metering happens before its
-// output gamma, so aiming a little higher on the OUTPUT is not greed.
-constexpr int kAimMean = 105;
-constexpr int kExpMax = 4000;    // 0x03/0x04 is 12 bits
-constexpr uint8_t kLongFrame = 0xFF;   // vertical blanking, i.e. exposure headroom
-// Exposure cannot exceed the frame, and the frame is the sensor window (488
-// rows) plus vertical blanking. VB is 8 bits and already maxed, so this is
-// genuinely all the exposure there is - which is what sent us looking for gain.
-constexpr int kExpCeil = 740;
+// The exposure register pair is twelve bits wide. Not a tuning choice - the
+// hardware's limit, and the only one of the old constants that was ever a fact.
+constexpr int kExpMax = 4000;
 
+// 📐 WHAT THE LEVERS ARE WORTH, measured on a held scene with the AEC off:
+//
+//        exp  240=27 480=30 740=34 1200=41 2000=51 3000=60
+//        gain 14=34  1C=39  24=43  2C=46   34=49   3C=52
+//
+// 🔴 THE OUTPUT GOES AS ROUGHLY THE CUBE ROOT OF THE LIGHT. That is the ISP's
+//    gamma, and it is why this took three days: twelve times the exposure is
+//    barely twice the picture, so EVERY single-register experiment reported "no
+//    visible change" and two working levers were written off - gain explicitly,
+//    in a comment, as measured noise.
+//
+// ⚠️ SO CORRECT BY THE CUBE, never by a ratio. A linear correction on a gamma'd
+//    measurement creeps so slowly it reads as another dead lever.
+//
+// ⚠️ AND NEITHER LEVER REACHES A GOOD EXPOSURE ALONE: exposure alone stops at
+//    mean 60, gain alone at 52, and a lit room wants about 100. It takes both,
+//    which is why every attempt at one knob at a time failed.
 // 🔴 0x50 IS THE GLOBAL GAIN, and that was measured rather than looked up.
 //
 //    gc0308_regs.h names seven registers and none of them is a gain, so a
@@ -206,8 +222,9 @@ constexpr int kExpCeil = 740;
 //       measured each time, never by a formula. Assuming it was linear would
 //       overshoot wildly on the first correction.
 constexpr uint8_t kGainReg = 0x50;
-constexpr uint8_t kGainMax = 0x60;   // the value the sweep actually exercised
-constexpr uint8_t kGainStep = 0x18;
+// 🔴 SIX BITS. The old sweep ran this to 0xFF and reported chaos plus four dead
+//    frames; more than half of it was simply out of range.
+constexpr uint8_t kGainMax = 0x3C;
 
 // ⏱️ HORIZONTAL BLANKING IS A DEAD LEVER HERE, and that is worth writing down so
 //    nobody spends an evening on it twice.
@@ -252,32 +269,6 @@ void Wr(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t val) {
     if (dev == nullptr) return;
     uint8_t b[2] = {reg, val};
     i2c_master_transmit(dev, b, 2, 100);
-}
-
-// What we borrowed, so it can be handed back. `held` is false when the sensor
-// was unreachable, in which case nothing was changed and nothing needs undoing.
-struct Borrowed {
-    bool held = false;
-    int aec_mode = -1, vb = -1, exp_h = -1, exp_l = -1, gain = -1;
-};
-
-Borrowed BeginStill(i2c_master_bus_handle_t bus) {
-    Borrowed b;
-    auto* dev = Dev(bus);
-    if (dev == nullptr) return b;
-    // Only page 0 is touched, and only after confirming we are on it - the
-    // register numbers below mean something entirely different on page 1.
-    if (Rd(dev, 0xfe) != 0x00) return b;
-    b.aec_mode = Rd(dev, 0xd2);
-    b.vb = Rd(dev, 0x02);
-    b.exp_h = Rd(dev, 0x03);
-    b.exp_l = Rd(dev, 0x04);
-    b.gain = Rd(dev, kGainReg);
-    if (b.aec_mode < 0 || b.vb < 0 || b.exp_h < 0 || b.exp_l < 0 || b.gain < 0) return b;
-    b.held = true;
-    Wr(dev, 0xd2, static_cast<uint8_t>(b.aec_mode & ~0x80));   // AEC off, we drive
-    Wr(dev, 0x02, kLongFrame);                                 // room to expose into
-    return b;
 }
 
 void SetExposure(i2c_master_bus_handle_t bus, int rows) {
@@ -363,16 +354,6 @@ void SetGain(i2c_master_bus_handle_t bus, int g) {
     Wr(Dev(bus), kGainReg, static_cast<uint8_t>(g));
 }
 
-void EndStill(i2c_master_bus_handle_t bus, const Borrowed& b) {
-    if (!b.held) return;
-    auto* dev = Dev(bus);
-    Wr(dev, kGainReg, static_cast<uint8_t>(b.gain));
-    Wr(dev, 0x03, static_cast<uint8_t>(b.exp_h));
-    Wr(dev, 0x04, static_cast<uint8_t>(b.exp_l));
-    Wr(dev, 0x02, static_cast<uint8_t>(b.vb));
-    Wr(dev, 0xd2, static_cast<uint8_t>(b.aec_mode));   // AEC back on, last
-}
-
 std::string Describe(i2c_master_bus_handle_t bus) {
     auto* dev = Dev(bus);
     if (dev == nullptr) return "sensor unreadable";
@@ -409,227 +390,15 @@ std::string Describe(i2c_master_bus_handle_t bus) {
 
 }  // namespace gc0308
 
-// 📷 Packed YUV422 -> RGB565, done here rather than by esp_imgfx.
+// 📊 WHAT IS IN A FRAME. Two measurements, no conversion.
 //
-// The GC0308 hands us YUV422 and the panel wants RGB565, so something has to
-// convert. EspVideo::Capture() will do it with esp_imgfx_color_convert(), and
-// the first photos off this robot came back through that path washed out and
-// tinted - a dim room rendered as a uniformly bright cyan rectangle.
-//
-// esp_image_effects ships as a prebuilt .a, so its YUV range convention cannot
-// be read. Fifty lines of arithmetic we own beats a blob we cannot inspect when
-// the complaint is precisely about levels: this uses FULL-RANGE BT.601 (JFIF),
-// which is what a sensor emits. Applying the studio-swing 16..235 expansion to
-// full-range data is the classic way to produce exactly the crushed blacks and
-// blown highlights that were on the screen.
-//
-// 🔴 WHICH BYTE IS LUMA IS MEASURED, NOT ASSUMED.
-//
-//    Packed YUV422 comes in two interleavings and they differ only by a
-//    one-byte phase:
-//
-//        UYVY   U0 Y0 V0 Y1      luma on ODD bytes
-//        YUYV   Y0 U0 Y1 V0      luma on EVEN bytes
-//
-//    Get it backwards and luma comes from the chroma samples - which sit near
-//    128 in any low-saturation scene - so the picture is uniformly mid-bright
-//    no matter how dark the room, while the real luma drives chroma and paints
-//    the whole thing one colour. That is a precise description of the first
-//    photo, and this sensor is running a SUBSAMPLED mode where a phase slip is
-//    entirely plausible.
-//
-//    Rather than guess which of the two it is, measure: luma has far more
-//    spatial variance than chroma in any real scene. Pick the stream with the
-//    higher variance and log the choice next to the format the driver claims.
-//    A wrong pick is only possible when the two are indistinguishable, i.e.
-//    when the frame is flat - and then it does not matter what we picked.
-namespace yuv422 {
-
-// 16.16 fixed point, full-range BT.601.
-constexpr int kRv = 91881;    //  1.402
-constexpr int kGu = 22554;    // -0.344136
-constexpr int kGv = 46802;    // -0.714136
-constexpr int kBu = 116130;   //  1.772
-
-inline uint8_t Clamp(int v) {
-    return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
-}
-
-// Spatial activity of one interleaved stream: |b[i] - b[i+4]|, i.e. this
-// channel's sample in one 2-pixel group against the same channel's sample in
-// the next. Both phases therefore sample one byte per group, so the two numbers
-// are directly comparable.
-//
-// Whichever phase is luma wins, and not marginally: chroma is what 4:2:2
-// throws away precisely because it carries far less high-frequency detail than
-// luma. Comparing bytes 2 apart instead would put U against V, which is a
-// measure of saturation rather than of detail - a strongly coloured wall would
-// then read as "busy" and could outvote a smooth luma gradient.
-static uint32_t StreamActivity(const uint8_t* p, size_t len, int phase) {
-    uint32_t sum = 0;
-    for (size_t i = phase; i + 4 < len; i += 4) {
-        const int d = static_cast<int>(p[i]) - static_cast<int>(p[i + 4]);
-        sum += static_cast<uint32_t>(d < 0 ? -d : d);
-    }
-    return sum;
-}
-
-// Even bytes carry luma in YUYV, odd bytes in UYVY. Measured, per the note above.
-static bool LumaEven(const uint8_t* p, size_t len) {
-    return StreamActivity(p, len, 0) >= StreamActivity(p, len, 1);
-}
-
-// Mean luma of a packed YUV422 frame, or -1 if it is not one. This is the
-// METER: the exposure loop drives the sensor until this number is where we want
-// it, which is the whole difference between collecting light and amplifying the
-// dark afterwards.
-static int MeanLuma(const uint8_t* src, size_t len, v4l2_pix_fmt_t fmt) {
-    if (src == nullptr || len < 8) return -1;
-    if (fmt != V4L2_PIX_FMT_YUYV && fmt != V4L2_PIX_FMT_UYVY) return -1;
-    const size_t off = LumaEven(src, len) ? 0 : 1;
-    uint64_t sum = 0;
-    size_t n = 0;
-    for (size_t i = off; i < len; i += 4) {
-        sum += src[i];
-        n++;
-    }
-    return n ? static_cast<int>(sum / n) : -1;
-}
-
-// 🔴 MEAN LUMA CANNOT TELL A PICTURE FROM A BLANK SCREEN, and a sweep that
-//    reports only the mean will happily call the blank one a success.
-//
-//    A sensor putting out nothing usually puts out uniform mid-grey, which
-//    measures as mean 128 - almost exactly the number a well-exposed frame is
-//    driven towards. The first gain sweep returned 128 twice and it was
-//    impossible to tell which had happened.
-//
-//    The range settles it in one line: a real indoor scene spans most of 0-255,
-//    while a dead frame is a couple of values wide. Same lesson as the rest of
-//    this file - a diagnostic has to be able to report the bad news.
-static void LumaRange(const uint8_t* src, size_t len, v4l2_pix_fmt_t fmt, int* lo, int* hi) {
-    *lo = -1;
-    *hi = -1;
-    if (src == nullptr || len < 8) return;
-    if (fmt != V4L2_PIX_FMT_YUYV && fmt != V4L2_PIX_FMT_UYVY) return;
-    const size_t off = LumaEven(src, len) ? 0 : 1;
-    int mn = 255, mx = 0;
-    for (size_t i = off; i < len; i += 4) {
-        const int v = src[i];
-        if (v < mn) mn = v;
-        if (v > mx) mx = v;
-    }
-    *lo = mn;
-    *hi = mx;
-}
-
-// Returns a freshly allocated w*h*2 RGB565 (little-endian) buffer, or nullptr.
-// The caller owns it; hand it to LvglAllocatedImage and let that free it.
-//
-// HOW THIS ENDED, because the shape of it is worth keeping.
-//
-// The picture went bleached -> legible -> good, and NONE of the fixes were in
-// this function. Every real gain came from upstream of it:
-//
-//   1. The byte phase was measured rather than trusted. It turned out to AGREE
-//      with the driver, which killed the leading theory but confirmed the tone
-//      curve was at least operating on real luma.
-//   2. The frame was arriving at mean 29 with zero clipping. Not too bright -
-//      too DARK, which is the opposite of what the first report suggested.
-//   3. The sensor's own AEC was on, targeting 72, delivering 30, and pinned at
-//      the frame length. Exposure was spent, so it never got there.
-//   4. The gain register was found by sweeping candidates on hardware, because
-//      the driver names none of them.
-//
-// 🔴 THE LESSON, AND IT IS THE ONE THIS PROJECT KEEPS RELEARNING: this function
-//    was tuned three times against a symptom it could not fix. A tone curve can
-//    only redistribute light that was captured; when the complaint is "bleached
-//    out" and the gain is sitting at its ceiling, that is the code SAYING the
-//    problem is upstream. Turning kGamma or kKnee at that point would have made
-//    a flatter picture and buried the real cause.
-//
-//    So: if the picture is wrong again, read the diag line in the tool result
-//    FIRST. mean and gain together say whether there is light to work with, and
-//    only if there is does anything below this line deserve adjusting.
-// 🔻 AVERAGE A VGA FRAME DOWN TO THE PANEL'S SIZE, in YUV, before anything
-//    else looks at it.
-//
-//    Four samples per output pixel. That is a two-stop improvement in noise for
-//    free, and because the CHROMA is averaged as well it is most of the reason
-//    colour survives in a dim room - a single noisy sample has its colour
-//    swamped, four averaged ones do not.
-//
-//    Done here rather than by asking the sensor for 320x240, because the
-//    sensor's own 320x240 mode SUBSAMPLES (throws three of every four pixels
-//    away) and, worse, halves the row time. See the sdkconfig note.
-//
-// ⚠️ Byte order is discovered, not assumed - same as ToRgb565 below, and for
-//    the same reason: this driver has been seen to disagree with itself about
-//    UYVY and YUYV.
-static uint8_t* HalveUyvy(const uint8_t* src, size_t src_len, int w, int h, bool luma_even) {
-    if (src == nullptr || (w & 1) || (h & 1)) return nullptr;
-    const int ow = w / 2, oh = h / 2;
-    const size_t need = static_cast<size_t>(ow) * oh * 2;
-    if (src_len < static_cast<size_t>(w) * h * 2) return nullptr;
-
-    uint8_t* dst = static_cast<uint8_t*>(
-        heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (dst == nullptr) return nullptr;
-
-    const int yo = luma_even ? 0 : 1;   // luma byte within each pair
-    const int co = luma_even ? 1 : 0;   // chroma byte within each pair
-    const size_t row = static_cast<size_t>(w) * 2;
-
-    for (int oy = 0; oy < oh; oy++) {
-        const uint8_t* r0 = src + row * (oy * 2);
-        const uint8_t* r1 = r0 + row;
-        uint8_t* out = dst + static_cast<size_t>(ow) * 2 * oy;
-        for (int ox = 0; ox < ow; ox++) {
-            // One output PAIR covers two input pairs across and two rows down,
-            // i.e. 16 bytes in, 4 bytes out.
-            const uint8_t* a = r0 + static_cast<size_t>(ox) * 8;
-            const uint8_t* b = r1 + static_cast<size_t>(ox) * 8;
-
-            // Four luma samples per output pixel, twice (two output pixels).
-            const int y0 = (a[yo] + a[yo + 2] + b[yo] + b[yo + 2] + 2) / 4;
-            const int y1 = (a[yo + 4] + a[yo + 6] + b[yo + 4] + b[yo + 6] + 2) / 4;
-            // U and V each appear once per input pair; average the four in the
-            // 2x2 block. co lands on U for the first pair, V for the second.
-            const int u = (a[co] + b[co] + a[co + 4] + b[co + 4] + 2) / 4;
-            const int v = (a[co + 2] + b[co + 2] + a[co + 6] + b[co + 6] + 2) / 4;
-
-            uint8_t* o = out + static_cast<size_t>(ox) * 4;
-            o[luma_even ? 0 : 1] = static_cast<uint8_t>(y0);
-            o[luma_even ? 1 : 0] = static_cast<uint8_t>(u);
-            o[luma_even ? 2 : 3] = static_cast<uint8_t>(y1);
-            o[luma_even ? 3 : 2] = static_cast<uint8_t>(v);
-        }
-    }
-    return dst;
-}
-
-// 🎨 HOW MUCH COLOUR IS IN THE FRAME, measured rather than assumed.
-//
-//    U and V are centred on 128: 128 means "no colour in this direction". A
-//    real scene spreads them; a greyscale frame pins them. Everything else in
-//    the diag is luma, which is why an afternoon of exposure theories never
-//    touched the actual complaint.
-//
-//    Returns the largest deviation from neutral seen in each channel, so a
-//    single saturated object still shows up rather than being averaged away.
-static void ChromaSpread(const uint8_t* src, size_t len, bool luma_even,
-                         int* u_dev, int* v_dev) {
-    *u_dev = *v_dev = 0;
-    const int co = luma_even ? 1 : 0;
-    for (size_t i = 0; i + 3 < len; i += 4) {
-        const int du = src[i + co] - 128;
-        const int dv = src[i + co + 2] - 128;
-        const int au = du < 0 ? -du : du;
-        const int av = dv < 0 ? -dv : dv;
-        if (au > *u_dev) *u_dev = au;
-        if (av > *v_dev) *v_dev = av;
-    }
-}
+//    The sensor's ISP emits RGB565 and the panel takes it unchanged, so nothing
+//    here converts anything any more. What used to live in this namespace - a
+//    YUV422 to RGB565 conversion, a tone curve, a per-pixel chroma table and a
+//    dither - was six hundred lines written to rescue frames that were three
+//    stops under. Metering the exposure properly removed the problem they were
+//    hiding, so they went. See git history if they are ever wanted again.
+namespace frame {
 
 // 📊 WHAT IS ACTUALLY IN AN RGB565 FRAME.
 //
@@ -662,363 +431,28 @@ static void Rgb565Stats(const uint8_t* data, size_t len, char* out, size_t out_l
              rlo, rhi, glo, ghi, blo, bhi);
 }
 
-static uint8_t* ToRgb565(const uint8_t* src, size_t src_len, int w, int h,
-                         v4l2_pix_fmt_t declared, std::string* diag = nullptr) {
-    const size_t need = static_cast<size_t>(w) * h * 2;
-    if (src == nullptr || src_len < need) {
-        return nullptr;
+// 📏 ONE NUMBER FOR A SWEEP. Rgb565Stats formats a string; a loop needs a
+//    comparable scalar, decoded exactly as Rgb565Stats decodes so the results
+//    line up with every mean already written down.
+//
+//    The buffer is byte-swapped for the JPEG encoder, so the channels are not
+//    individually trustworthy here - but the swap is the same for every shot,
+//    and a sweep only needs the levers compared against each other.
+static int MeanRgb565(const uint8_t* data, size_t len) {
+    const uint16_t* px = reinterpret_cast<const uint16_t*>(data);
+    const size_t n = len / 2;
+    if (data == nullptr || n == 0) return -1;
+    uint32_t sum = 0;
+    for (size_t i = 0; i < n; i++) {
+        const uint16_t v = px[i];
+        sum += static_cast<uint32_t>((((v >> 11) & 0x1F) << 3) +
+                                     (((v >> 5) & 0x3F) << 2) +
+                                     ((v & 0x1F) << 3)) / 3;
     }
-
-    {
-        int ud = 0, vd = 0;
-        ChromaSpread(src, src_len, LumaEven(src, src_len), &ud, &vd);
-        ESP_LOGI(TAG, "photo: chroma spread u=%d v=%d (0 means a greyscale frame)", ud, vd);
-    }
-    const uint32_t even = StreamActivity(src, src_len, 0);
-    const uint32_t odd = StreamActivity(src, src_len, 1);
-    // Luma on even bytes means YUYV.
-    const bool luma_even = LumaEven(src, src_len);
-    const bool declared_yuyv = (declared == V4L2_PIX_FMT_YUYV);
-    ESP_LOGI(TAG, "photo: %dx%d, driver says %s, activity even=%lu odd=%lu -> luma on %s bytes%s",
-             w, h, declared_yuyv ? "YUYV" : "UYVY", (unsigned long)even, (unsigned long)odd,
-             luma_even ? "even" : "odd",
-             luma_even == declared_yuyv ? "" : "  <- DISAGREES WITH THE DRIVER");
-
-    uint8_t* dst = static_cast<uint8_t*>(heap_caps_malloc(need, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (dst == nullptr) {
-        ESP_LOGE(TAG, "photo: no PSRAM for a %u byte RGB565 frame", (unsigned)need);
-        return nullptr;
-    }
-
-    // Byte offsets within each 4-byte, 2-pixel group.
-    const int y0 = luma_even ? 0 : 1;
-    const int y1 = luma_even ? 2 : 3;
-    const int cb = luma_even ? 1 : 0;
-    const int cr = luma_even ? 3 : 2;
-
-    const size_t groups = need / 4;   // 2 pixels per group
-
-    // 🔴 A TONE CURVE, because the GC0308's own is built for a viewfinder and
-    //    this is a 2" panel in a dim room.
-    //
-    //    The sensor has no reset line, no power-down line and no XCLK from us -
-    //    it free-runs off its own crystal - and the driver exposes exactly two
-    //    controls, HFLIP and VFLIP. There is no exposure, gain or contrast knob
-    //    to turn. So the correction happens here, on the luma channel only, and
-    //    the chroma is left alone: scaling Y changes brightness and contrast
-    //    without touching hue.
-    //
-    //    Two corrections, both measured from the frame rather than assumed:
-    //
-    //    1. EXPOSURE TRIM. The sensor's auto-exposure meters for the whole
-    //       scene, and a dim room with one bright lamp in it is exactly the
-    //       case it gets wrong - it opens up until the lamp is a white hole.
-    //       Normalising the frame's own mean luma toward a target undoes that
-    //       by however much it was actually off, which is why the gain is
-    //       computed and not written down as a constant.
-    //
-    //    2. A SOFT SHOULDER. Applying a gain and clamping just moves where the
-    //       clipping happens. Rolling the top end off compresses highlights
-    //       into the last stretch of range instead of stacking them all on 255,
-    //       which is most of what "too much contrast" looks like on a small
-    //       panel - the picture reading as a few white blobs on near-black.
-    //
-    //    Built as a 256-entry lookup table, so the per-pixel cost is one index
-    //    no matter how elaborate the curve gets. 76800 pixels do not want a
-    //    tanh() each.
-    // 🔴 A LINEAR GAIN TOWARD A MEAN IS THE WRONG CURVE FOR THIS SCENE, and it
-    //    was the actual cause of "bleached out, can barely see my head".
-    //
-    //    What the sensor really hands over, measured by sweeping its gain right
-    //    up to 0xFF with exposure pinned at the frame length:
-    //
-    //        g=0x60: mean 38, range [28-236]
-    //        g=0xFF: mean 50, range [28-254]
-    //
-    //    Note the RANGE. The frame is not uniformly dark - its highlights are
-    //    already at or near clipping while its mean sits around 40. That is a
-    //    high-dynamic-range room: something bright in shot (a window, a monitor,
-    //    a lamp) and a subject far darker than it.
-    //
-    //    The old curve multiplied everything by mean-to-target, capped at 2.0,
-    //    and rolled off the top. With a mean of 50 that is a flat 2x, so every
-    //    pixel above about 88 arrived at white - the bright half of the room
-    //    became a single sheet of paper - while the face, at luma 35, crawled up
-    //    to 83 and stayed dim and noisy. Both complaints in one operation.
-    //
-    //    So the gain is gone, and two measured things replace it:
-    //
-    //    1. A BLACK POINT, taken from the frame's own 1st percentile. There is a
-    //       pedestal here - the darkest pixel measured 28, never 0 - and lifting
-    //       an image without removing it turns black into milky grey, which is
-    //       the other half of what "bleached" describes.
-    //
-    //    2. A POWER CURVE whose exponent is SOLVED so the frame's own mean lands
-    //       on the target. Below 1 it lifts shadows hard while mapping 255 to
-    //       255 exactly, so it CANNOT clip - no knee needed, and the highlights
-    //       that used to be destroyed are simply left alone. For this frame it
-    //       works out near 0.35, which lifts the face further than the old 2x
-    //       did while bringing the lamp DOWN from 255 to about 248.
-    //
-    //    Percentiles need a histogram, and the histogram is free: the mean
-    //    already costs a full pass over the luma, so it is built in that pass.
-    constexpr int kTargetMean = 112;   // slightly below mid: rooms are dim
-    constexpr float kMinExp = 0.30f;   // below this, shadows are mostly noise
-    constexpr float kMaxExp = 1.60f;
-
-    uint32_t hist[256] = {0};
-    uint64_t luma_sum = 0;
-    uint32_t hot = 0;
-    for (size_t g = 0; g < groups; g++) {
-        const int y = src[g * 4 + y0];
-        hist[y]++;
-        luma_sum += y;
-        if (y >= 250) hot++;
-    }
-    const int mean = groups ? static_cast<int>(luma_sum / groups) : kTargetMean;
-
-    // 1st and 99th percentile rather than min and max: a single hot or dead
-    // pixel must not set the range for the whole picture.
-    int black = 0, white = 255;
-    if (groups > 0) {
-        const uint32_t lo_at = static_cast<uint32_t>(groups / 100);
-        const uint32_t hi_at = static_cast<uint32_t>(groups - groups / 100);
-        uint32_t seen = 0;
-        for (int i = 0; i < 256; i++) {
-            seen += hist[i];
-            if (seen > lo_at) { black = i; break; }
-        }
-        seen = 0;
-        for (int i = 0; i < 256; i++) {
-            seen += hist[i];
-            if (seen >= hi_at) { white = i; break; }
-        }
-    }
-    // A flat frame is a dead frame, not a picture. The sensor intermittently
-    // returns uniform mid-grey - the gain sweep caught it twice, reading exactly
-    // mean 128 with a range of [128-128] - and stretching that produces a
-    // confident grey rectangle. Leave it alone and let the numbers say so.
-    const bool flat = (white - black) < 8;
-    if (flat) {
-        black = 0;
-        white = 255;
-    }
-
-    // 🔴 A BARE POWER CURVE IS VERTICAL AT THE BOTTOM, and at these exponents
-    //    that wrecks the shadows.
-    //
-    //    Solving for a mean of 34 gives an exponent near 0.33, and x^0.33 has
-    //    infinite slope at x=0: ONE input level above the black point came out at
-    //    60. Nothing can dither across a gap that size, and everything that lives
-    //    down there - sensor noise, mostly - got expanded with it. That is the
-    //    artefacting in the dark areas.
-    //
-    //    So the curve gets a TOE, the same idea as sRGB's linear segment: shift
-    //    the input away from the singularity by a small amount and renormalise,
-    //    which bounds the slope at black while leaving the midtone lift intact.
-    //    The same input level now arrives at 13 instead of 60.
-    constexpr float kToe = 0.05f;
-    auto curve = [](float x, float p) -> float {
-        const float lo = powf(kToe, p);
-        const float hi = powf(1.0f + kToe, p);
-        return (powf(x + kToe, p) - lo) / (hi - lo);
-    };
-
-    float exponent = 1.0f;
-    if (!flat) {
-        const float span = static_cast<float>(white - black);
-        float m = (static_cast<float>(mean) - black) / span;
-        if (m < 0.01f) m = 0.01f;
-        if (m > 0.99f) m = 0.99f;
-        const float t = static_cast<float>(kTargetMean) / 255.0f;
-        // Solved numerically rather than in closed form: the toe means the
-        // exponent that puts the mean on target is no longer just a ratio of
-        // logs, and twenty bisections of a monotonic function is nothing next to
-        // the per-pixel work that follows. Doing it in closed form against the
-        // curve we are NOT using is how a fix lands the mean in the wrong place.
-        float lo = kMinExp, hi = kMaxExp;
-        for (int i = 0; i < 20; i++) {
-            const float mid = 0.5f * (lo + hi);
-            // Smaller exponent lifts more, so the result falls as the exponent
-            // rises - hence the comparison this way round.
-            if (curve(m, mid) > t) {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-        exponent = 0.5f * (lo + hi);
-    }
-
-    const unsigned long clip_pct = groups ? hot * 100 / groups : 0;
-    ESP_LOGI(TAG, "photo: mean %d range [%d-%d] %lu%% at clip -> exponent %.2f%s", mean, black,
-             white, clip_pct, exponent, flat ? " (FLAT - dead frame?)" : "");
-    if (diag != nullptr) {
-        char buf[144];
-        snprintf(buf, sizeof(buf), "%dx%d %s luma=%s mean=%d blk=%d wht=%d clip=%lu%% exp=%.2f%s",
-                 w, h, declared_yuyv ? "YUYV" : "UYVY", luma_even ? "even" : "odd", mean, black,
-                 white, clip_pct, exponent, flat ? " FLAT" : "");
-        *diag = buf;
-
-        // ⚠️ AFTER the assignment, not before: an earlier version appended the
-        //    chroma here and then `*diag = buf` wiped it, so the measurement was
-        //    computed and discarded on two separate flashes while I carried on
-        //    reasoning without it.
-        //
-        // 🎨 U and V are centred on 128, where 128 means no colour. This is the
-        //    largest deviation from neutral anywhere in the frame, so one
-        //    saturated object still registers rather than being averaged away.
-        //    Near zero means the sensor is handing us a greyscale picture and
-        //    nothing downstream can invent colour; a healthy number means the
-        //    colour is arriving and we are losing it.
-        int ud = 0, vd = 0;
-        ChromaSpread(src, src_len, LumaEven(src, src_len), &ud, &vd);
-        char cbuf[48];
-        snprintf(cbuf, sizeof(cbuf), " chroma=%d/%d", ud, vd);
-        *diag += cbuf;
-    }
-
-    uint8_t lut[256];
-    for (int i = 0; i < 256; i++) {
-        float x = (static_cast<float>(i) - black) / static_cast<float>(white - black);
-        if (x < 0.0f) x = 0.0f;
-        if (x > 1.0f) x = 1.0f;
-        lut[i] = Clamp(static_cast<int>(255.0f * curve(x, exponent) + 0.5f));
-    }
-
-    // Chroma has to move with the luma or the colour drifts. YUV encodes
-    // saturation as an offset from a given brightness, so darkening Y while
-    // leaving U and V alone makes everything look lurid, and brightening it
-    // makes everything look washed out. Scale the colour differences by however
-    // much the curve moved a typical pixel. 8.8 fixed point.
-    //
-    // ⚠️ BUT CAPPED, and the cap is why the picture stopped looking like an old
-    //    16-colour monitor. The shadow lift is far stronger than the old linear
-    //    gain ever was - mean 34 arriving at 112 is 3.3x - and following it with
-    //    chroma drives U and V into clipping across most of the frame. Clipped
-    //    chroma is not "more colourful": every subtle shade collapses onto the
-    //    same few saturated corners, which is exactly what posterisation looks
-    //    like. The old code never hit this because its gain was capped at 2.0,
-    //    so this cap is not new caution - it is the old one, restored where it
-    //    now belongs.
-    //
-    //    1.75x keeps colour tracking a moderate lift and stops it tracking an
-    //    extreme one. Chroma at very low luma is mostly sensor noise anyway, and
-    //    amplifying noise is not saturation.
-    //
-    // 🔬 RAISED FROM 448 (1.75x) TO 704 (2.75x), AND HERE IS THE ARITHMETIC.
-    //    A lit room arrives at mean 31 and the curve lifts it to 112 - a factor
-    //    of 3.6. Capping chroma at 1.75 leaves relative saturation at 1.75/3.6
-    //    = 0.49, so the picture is HALF as colourful as the scene, by
-    //    construction, every time. That is the monochrome look: only an object
-    //    saturated enough to survive halving keeps any colour, which is why a
-    //    drinks can showed some and nothing else did.
-    //
-    // ⚠️ The original cap is not wrong, it is tuned for a different frame. It
-    //    was set when the lift was about 2x, where 1.75 tracks it closely. The
-    //    honest fix is to stop arriving at mean 31 in a lit room; until that is
-    //    solved this trades a little of the posterisation the cap prevents for
-    //    a picture that has colour in it at all.
-    constexpr int kMaxCscale = 704;   // 2.75x in 8.8
-
-    // 🎨 CHROMA GAIN PER PIXEL, NOT PER FRAME.
-    //
-    //    This used to be a single number - lut[mean]/mean - applied to every
-    //    pixel in the picture. But the curve lifts a shadow far harder than a
-    //    highlight, and saturation survives only if a pixel's colour is scaled
-    //    by the same factor as its own luma: R = Y + 1.402V keeps (R-Y)/Y
-    //    constant only when V follows Y.
-    //
-    //    With one global scale, everything darker than the frame mean got its
-    //    luma multiplied hard and its colour multiplied by a modest constant,
-    //    and washed to grey - while a bright object held close to the lens came
-    //    out about right. That is precisely how the fault presented, and it is
-    //    why a chroma measurement of 58/64 in the RAW frame still produced a
-    //    monochrome picture.
-    //
-    // ⚠️ The cap stays, and now does the job it was described as doing: it
-    //    limits individual highlights instead of flattening the whole frame.
-    static uint16_t cscale_lut[256];
-    for (int i = 0; i < 256; i++) {
-        int c = i > 0 ? (lut[i] * 256 / i) : 256;
-        if (c > kMaxCscale) c = kMaxCscale;
-        if (c < 256) c = 256;          // never desaturate below the original
-        cscale_lut[i] = static_cast<uint16_t>(c);
-    }
-
-    // 🎨 ORDERED DITHER, because the panel is RGB565 and the curve now stretches
-    //    a narrow range a long way.
-    //
-    //    The frame arrives with its luma inside roughly 70 distinct values. The
-    //    curve spreads those across the full 0-255, so neighbouring input levels
-    //    land several output levels apart, and then 5/6/5 truncation rounds them
-    //    to the same handful of endpoints. The result is banding - flat plates of
-    //    colour with hard edges between them, on what should be a smooth face.
-    //
-    //    A 4x4 Bayer threshold spread over the quantisation step trades that for
-    //    a faint high-frequency texture the eye integrates into the shades that
-    //    are not representable. It costs one table lookup and an add per pixel,
-    //    and nothing at all in memory.
-    static const uint8_t kBayer[16] = {
-         0,  8,  2, 10,
-        12,  4, 14,  6,
-         3, 11,  1,  9,
-        15,  7, 13,  5,
-    };
-    const size_t groups_per_row = w / 2;
-
-    // 🎚 HOW MUCH DITHER THIS FRAME ACTUALLY NEEDS.
-    //
-    //    The amplitude was fixed, chosen when every frame arrived with ~70
-    //    distinct luma values and the curve spread them across the full range.
-    //    With gain now driven, a lit room arrives with a real range and the
-    //    curve barely stretches - so a full-strength dither is texture laid
-    //    over a picture that has no banding left to hide, which reads as
-    //    ghosting in the blacks.
-    //
-    //    `cscale` is already the stretch factor in 8.8 (lut[mean]/mean). Below
-    //    about 1.5x there is nothing to hide; by 3x the dither is worth its
-    //    full amplitude. Linear between, in eighths, so it fades rather than
-    //    switching.
-    // Judged on the frame's average lift, which is what banding follows.
-    int dither_num = ((cscale_lut[mean] - 384) * 8) / (768 - 384);
-    if (dither_num < 0) dither_num = 0;
-    if (dither_num > 8) dither_num = 8;
-
-    uint16_t* out = reinterpret_cast<uint16_t*>(dst);
-    for (size_t g = 0; g < groups; g++) {
-        const uint8_t* p = src + g * 4;
-        const int u = static_cast<int>(p[cb]) - 128;
-        const int v = static_cast<int>(p[cr]) - 128;
-        // Unscaled colour differences; each pixel applies its own gain below.
-        const int dr0 = (kRv * v) >> 16;
-        const int dg0 = -((kGu * u + kGv * v) >> 16);
-        const int db0 = (kBu * u) >> 16;
-        const size_t row = groups_per_row ? g / groups_per_row : 0;
-        const size_t col = groups_per_row ? g % groups_per_row : 0;
-        for (int k = 0; k < 2; k++) {
-            const uint8_t y_in = p[k == 0 ? y0 : y1];
-            const int y = lut[y_in];
-            // This pixel's own lift, so colour tracks it rather than the frame.
-            const int cs = cscale_lut[y_in];
-            const int dr = (dr0 * cs) >> 8;
-            const int dg = (dg0 * cs) >> 8;
-            const int db = (db0 * cs) >> 8;
-            // Red and blue keep 5 bits (step 8), green keeps 6 (step 4), so the
-            // threshold is spread across a different distance for each.
-            const int bay = kBayer[((row & 3) << 2) | ((col * 2 + k) & 3)];
-            const int d5 = (((bay >> 1) - 4) * dither_num) >> 3;
-            const int d6 = (((bay >> 2) - 2) * dither_num) >> 3;
-            const uint8_t r = Clamp(y + dr + d5);
-            const uint8_t gg = Clamp(y + dg + d6);
-            const uint8_t b = Clamp(y + db + d5);
-            out[g * 2 + k] = static_cast<uint16_t>(((r & 0xF8) << 8) | ((gg & 0xFC) << 3) | (b >> 3));
-        }
-    }
-    return dst;
+    return static_cast<int>(sum / n);
 }
 
-}  // namespace yuv422
+}  // namespace frame
 
 class M5StackStackChanBoard : public WifiBoard {
     StackChanHead head_;
@@ -1032,7 +466,9 @@ private:
     // Same object as display_, kept typed so the board can reach the parts of
     // StackyFace that are not on the Display interface (the idle status screen).
     StackyFace* face_ = nullptr;
-    EspVideo* camera_;
+    // Either driver - see the switch in the camera init. The shared surface
+    // (frame accessors, streaming, preview, explain) lives on Camera itself.
+    Camera* camera_;
     esp_timer_handle_t touchpad_timer_;
 
     // --- on-screen settings -------------------------------------------------
@@ -1684,43 +1120,70 @@ private:
      void InitializeCamera() {
         WaitForVsyncGap();
 
-        static esp_cam_ctlr_dvp_pin_config_t dvp_pin_config = {
-            .data_width = CAM_CTLR_DATA_WIDTH_8,
-            .data_io = {
-                [0] = CAMERA_PIN_D0,
-                [1] = CAMERA_PIN_D1,
-                [2] = CAMERA_PIN_D2,
-                [3] = CAMERA_PIN_D3,
-                [4] = CAMERA_PIN_D4,
-                [5] = CAMERA_PIN_D5,
-                [6] = CAMERA_PIN_D6,
-                [7] = CAMERA_PIN_D7,
-            },
-            .vsync_io = CAMERA_PIN_VSYNC,
-            .de_io = CAMERA_PIN_HREF,
-            .pclk_io = CAMERA_PIN_PCLK,
-            .xclk_io = CAMERA_PIN_XCLK,
-        };
+        camera_config_t cam = {};
+        cam.pin_d0 = CAMERA_PIN_D0;
+        cam.pin_d1 = CAMERA_PIN_D1;
+        cam.pin_d2 = CAMERA_PIN_D2;
+        cam.pin_d3 = CAMERA_PIN_D3;
+        cam.pin_d4 = CAMERA_PIN_D4;
+        cam.pin_d5 = CAMERA_PIN_D5;
+        cam.pin_d6 = CAMERA_PIN_D6;
+        cam.pin_d7 = CAMERA_PIN_D7;
+        cam.pin_pclk = CAMERA_PIN_PCLK;
+        cam.pin_vsync = CAMERA_PIN_VSYNC;
+        cam.pin_href = CAMERA_PIN_HREF;
+        // ⚠️ -1, not a pin. The sensor has its own 20 MHz crystal, so the
+        //    ESP32 must not drive a clock at it, and SCCB reuses the I2C
+        //    bus this board already owns - port 1 - instead of installing a
+        //    second driver on top of the amp, the codec and the PY32.
+        cam.pin_xclk = -1;
+        cam.pin_sccb_sda = -1;
+        cam.pin_sccb_scl = -1;
+        cam.sccb_i2c_port = 1;
+        cam.pin_pwdn = -1;
+        cam.pin_reset = -1;
+        cam.xclk_freq_hz = XCLK_FREQ_HZ;
+        // The vendor's own settings, from their StackChan example and from
+        // upstream's AtomS3R-CAM board file - the same GC0308.
+        cam.pixel_format = PIXFORMAT_RGB565;
+        cam.frame_size = FRAMESIZE_QVGA;
+        cam.jpeg_quality = 12;
+        // 2, as M5Stack's own StackChan example uses. Capture() fetches
+        // twice per call to discard a stale frame, and with one buffer under
+        // GRAB_WHEN_EMPTY that is a wait for a frame that cannot arrive -
+        // the robot froze after its first photograph.
+        cam.fb_count = 2;
+        cam.fb_location = CAMERA_FB_IN_PSRAM;
+        cam.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
-        esp_video_init_sccb_config_t sccb_config = {
-            .init_sccb = false,
-            .i2c_handle = i2c_bus_,
-            .freq = 100000,
-        };
+        auto* cam_drv = new Esp32Camera(cam);
+        // Our show_photo draws the picture full-screen itself.
+        cam_drv->SetAutoPreview(false);
+        camera_ = cam_drv;
 
-        esp_video_init_dvp_config_t dvp_config = {
-            .sccb_config = sccb_config,
-            .reset_pin = CAMERA_PIN_RESET,
-            .pwdn_pin = CAMERA_PIN_PWDN,
-            .dvp_pin = dvp_pin_config,
-            .xclk_freq = XCLK_FREQ_HZ,
-        };
-
-        esp_video_init_config_t video_config = {
-            .dvp = &dvp_config,
-        };
-
-        camera_ = new EspVideo(video_config);
+        // 🔆 EXPOSURE COMPENSATION, through the driver rather than by hand.
+        //
+        //    Measured on the saved frame: mean 28 with a range of 16-224.
+        //    Correctly coloured, full contrast, about two stops under.
+        //
+        //    set_ae_level writes AEC_TARGET_Y (0xd3) as 0x48 + level*8, so
+        //    +2 moves the sensor's target from 72 to 88. That is the same
+        //    register this project poked by hand yesterday - downwards, on
+        //    the theory that highlights needed protecting, which made it
+        //    worse. The frame is dark; it wants the other direction.
+        //
+        // ⚠️ NOT set_brightness. That applies a digital offset, which lifts
+        //    the black point and produces the milky picture we have twice
+        //    mistaken for a white balance or byte-order fault.
+        constexpr int kAeLevel = 2;   // -2..+2; 0 is the sensor's default
+        if (sensor_t* sen = esp_camera_sensor_get()) {
+            if (sen->set_ae_level != nullptr && sen->set_ae_level(sen, kAeLevel) == 0) {
+                ESP_LOGI(TAG, "camera: AE level %+d (target %d)", kAeLevel,
+                         0x48 + kAeLevel * 8);
+            } else {
+                ESP_LOGW(TAG, "camera: AE level %+d refused", kAeLevel);
+            }
+        }
         camera_->SetHMirror(false);
         // We convert and preview the frame ourselves - see the yuv422 note.
         camera_->SetAutoPreview(false);
@@ -2354,142 +1817,129 @@ public:
                 head_.Center();
                 vTaskDelay(pdMS_TO_TICKS(400));   // let the servos arrive and stop
 
-                // 🔬 AEC LEFT ALONE, to test whether the sensor exposes better
-                //    than we do. M5Stack's own example does no sensor tuning at
-                //    all and their pictures are the good ones. Set
-                //    kLetSensorExpose false to get the manual loop back.
+                // 🔆 ROOM TO EXPOSE INTO. Vertical blanking to maximum: this
+                //    mode's frame is about 252 rows, and exposure cannot exceed
+                //    the frame, so without this the 4000-row exposure the
+                //    metering loop asks for has nowhere to go.
                 //
-                //    The manual path pins exposure and never touches gain,
-                //    which means that in a dim room - exposure already at the
-                //    frame length - there is no lever left at all. The sensor's
-                //    own AGC has one.
-                // Measured: the sensor's own AEC gives mean 25, the manual loop
-                // 31 - because BeginStill stretches vertical blanking to 0xFF
-                // and the sensor's own frame is only ~252 rows. Gain sat at
-                // 0x14 either way, so AGC is not the lever it looked like.
-                // 🔆 THE SENSOR EXPOSES ITSELF NOW, because the frame it
-                //    produces goes to the screen unprocessed.
+                // ⚠️ There used to be a five-frame settle loop here, waiting for
+                //    the sensor's AEC to find the scene - immediately before the
+                //    code below switches that AEC off. It was most of the pause
+                //    after the shutter and it never did anything.
+                gc0308::ExtendFrame(i2c_bus_);
+
+                // 🔆 WE EXPOSE THE STILL, because the sensor will not.
                 //
-                //    The manual loop existed to rescue a raw YUV frame: pin
-                //    exposure at the frame ceiling, walk gain to maximum, and
-                //    let our tone curve sort out the rest. Handing that
-                //    deliberately over-driven frame to the sensor's OWN ISP -
-                //    whose gamma and contrast assume its own auto-exposure -
-                //    blows the highlights, which is exactly what the first
-                //    RGB565 photograph did: colour everywhere at last, and the
-                //    subject whitened out.
+                //    Its AEC sits at exp=480 with a target of 88 while the frame
+                //    meters 30 - through a raised target and a doubled frame
+                //    length. It is not out of room, it has stopped.
                 //
-                //    M5Stack's example does no tuning at all. On this path that
-                //    is not laziness, it is the matching half of the design.
-                constexpr bool kLetSensorExpose = true;
-                gc0308::Borrowed borrowed{};
-                if (!kLetSensorExpose) {
-                    borrowed = gc0308::BeginStill(i2c_bus_);
-                } else {
-                    // Room first, then time: a longer frame is no use if the
-                    // AEC is not given a few of them to notice.
-                    gc0308::ExtendFrame(i2c_bus_);
-                    // Give its AEC a few frames to settle on the scene. Capture()
-                    // discards two frames per call, so five calls is about fifteen
-                    // frames - and it now has twice the exposure range to search.
-                    for (int i = 0; i < 5; i++) {
-                        camera_->Capture();
-                        vTaskDelay(pdMS_TO_TICKS(140));
-                    }
-                }
-                bool got = false;
-                int metered = -1;
-                // Start AT the ceiling, not above it. Starting at 900 meant the
-                // very first test - "is there exposure left?" - was already
-                // false, so the loop skipped straight to gain and the exposure
-                // branch could never run at all.
-                int exposure = gc0308::kExpCeil;
-                int gain = borrowed.gain;
-                if (borrowed.held) {
-                    // EXPOSURE FIRST, THEN GAIN - the order a camera uses, and
-                    // for the same reason: exposure collects more light, gain
-                    // only amplifies what arrived, noise included. Gain is the
-                    // last resort, not the first knob.
-                    // 🔴 GAIN IS NO LONGER DRIVEN, and that is a measurement, not
-                    //    a simplification. Sweeping 0x50 from 0x20 to 0xFF with
-                    //    exposure pinned at the frame length moved the mean
-                    //    between 33 and 50 with no ordering to it at all:
-                    //
-                    //        0x20:44  0x60:38  0x70:46  0x90:33  0xB0:48  0xFF:50
-                    //
-                    //    That is noise, not a gain curve - while four values in
-                    //    that range kill the frame outright. A lever that does not
-                    //    move the thing it is named after, and can break the
-                    //    picture, does not get to stay in the loop. The sensor
-                    //    keeps whatever gain its own AEC chose; the exposure below
-                    //    and the tone curve in ToRgb565 do the work.
-                    // More passes than before: gain now needs a few steps
-                    // of its own after exposure is spent.
-                    for (int pass = 0; pass < 8; pass++) {
-                        gc0308::SetExposure(i2c_bus_, exposure);
-                        // The sensor needs a frame or two to apply this. Metering
-                        // the frame that was already in flight would make the
-                        // loop chase its own tail.
-                        vTaskDelay(pdMS_TO_TICKS(160));
-                        got = camera_->Capture();
-                        if (!got) break;
-                        metered = yuv422::MeanLuma(camera_->frame_data(), camera_->frame_len(),
-                                                   camera_->frame_format());
-                        if (metered < 0) break;          // not YUV; nothing to meter on
-                        // 🔴 A DEAD FRAME LOOKS LIKE A PERFECT EXPOSURE. This
-                        //    sensor intermittently returns uniform mid-grey, which
-                        //    meters at exactly 128 - comfortably inside the
-                        //    acceptance window below, so the loop would stop and
-                        //    declare success on a picture of nothing. Caught by
-                        //    the gain sweep, which saw [128-128] twice. Check the
-                        //    range and spend another pass instead.
-                        {
-                            int lo = -1, hi = -1;
-                            yuv422::LumaRange(camera_->frame_data(), camera_->frame_len(),
-                                              camera_->frame_format(), &lo, &hi);
-                            if (lo >= 0 && (hi - lo) < 8) {
-                                ESP_LOGW(TAG, "flat frame (%d-%d) - retrying", lo, hi);
-                                continue;
+                //    Calibrated by a sweep on a held scene, AEC off at 0x22:
+                //
+                //        exp  240=27 480=30 740=34 1200=41 2000=51 3000=60
+                //        gain 14=34  1C=39  24=43  2C=46   34=49   3C=52
+                //
+                // 🔴 THE OUTPUT GOES AS ROUGHLY THE CUBE ROOT OF THE LIGHT - the
+                //    ISP's gamma. Twelve times the exposure is twice the picture.
+                //    This is why two days of one-register-at-a-time experiments
+                //    all reported "no change", and why gain was written off in a
+                //    comment as measured noise. Correct by the cube, or the loop
+                //    creeps so slowly it looks like another dead lever.
+                //
+                // ⚠️ Neither lever reaches 100 alone: exposure stops at 60, gain
+                //    at 52. It takes both.
+                constexpr bool kMeterStill = true;
+                constexpr int kTarget = 100;
+                constexpr int kExpTop = 4000;        // 0x03/0x04 is 12 bits
+                constexpr int kGainTop = 0x3C;       // the field is SIX bits
+                std::string sweep_log;
+                // Saved here, restored only AFTER the real frame is taken - handing
+                // the sensor back first would let its AEC undo the exposure we just
+                // worked out, one frame before the photograph.
+                int s_22 = -1, s_d2 = -1, s_h = -1, s_l = -1, s_g = -1;
+                if (kMeterStill) {
+                    auto* dev = gc0308::Dev(i2c_bus_);
+                    s_d2 = gc0308::Rd(dev, 0xd2);
+                    // 🔴 THE AEC ENABLE IS BIT 0 OF 0x22, not bit 7 of 0xd2. The
+                    //    first sweep cleared only 0xd2 and the AEC kept pulling
+                    //    exposure back to 480 underneath every write - which is
+                    //    why exposure looked like the dead lever and gain looked
+                    //    like the live one. bit1 AWB, bit2 AGC; init writes 0x57.
+                    s_22 = gc0308::Rd(dev, 0x22);
+                    s_h = gc0308::Rd(dev, 0x03);
+                    s_l = gc0308::Rd(dev, 0x04);
+                    s_g = gc0308::Rd(dev, 0x50);
+                    if (dev != nullptr && s_22 >= 0 && s_d2 >= 0 && s_h >= 0 && s_l >= 0 &&
+                        s_g >= 0) {
+                        // AEC and AGC off; AWB (bit1) left alone, because the
+                        // colour is the one thing about this picture that is right.
+                        gc0308::Wr(dev, 0x22, static_cast<uint8_t>(s_22 & ~0x05));
+                        gc0308::Wr(dev, 0xd2, static_cast<uint8_t>(s_d2 & ~0x80));
+
+                        // Start where the last photograph ended up. The room
+                        // rarely changes between two shots, so this usually
+                        // converges on the first pass instead of climbing from
+                        // the bottom every time - which the user sees as the
+                        // pause after the shutter.
+                        static int last_exposure = 740, last_gain = 0x14;
+                        int exposure = last_exposure, gain = last_gain, m = -1;
+                        for (int pass = 0; pass < 6; pass++) {
+                            gc0308::SetExposure(i2c_bus_, exposure);
+                            gc0308::SetGain(i2c_bus_, gain);
+                            // Two frames: the one already in flight was exposed
+                            // under the previous setting, and metering it is how
+                            // a loop ends up one step behind itself.
+                            vTaskDelay(pdMS_TO_TICKS(180));
+                            camera_->Capture();
+                            vTaskDelay(pdMS_TO_TICKS(120));
+                            if (!camera_->Capture()) break;
+                            m = frame::MeanRgb565(camera_->frame_data(), camera_->frame_len());
+                            char row[40];
+                            snprintf(row, sizeof(row), " %d/%02X=%d", exposure, gain, m);
+                            sweep_log += row;
+                            if (m <= 0) m = 1;
+                            if (m >= kTarget * 8 / 10 && m <= kTarget * 13 / 10) break;
+
+                            // How much more LIGHT, by the cube law. 64-bit: the
+                            // cube of a target overflows 32 bits at trivial values.
+                            const long long want = (long long)kTarget * kTarget * kTarget;
+                            const long long have = (long long)m * m * m;
+                            if (exposure < kExpTop) {
+                                long long next = (long long)exposure * want / have;
+                                if (next > kExpTop) next = kExpTop;
+                                if (next < 16) next = 16;
+                                if (next == exposure) break;   // nothing left to give
+                                exposure = (int)next;
+                            } else if (gain < kGainTop) {
+                                long long next = (long long)gain * want / have;
+                                if (next > kGainTop) next = kGainTop;
+                                if (next <= gain) break;
+                                gain = (int)next;
+                            } else {
+                                break;   // both levers spent; this is all there is
                             }
                         }
-                        if (metered >= 80 && metered <= 145) break;
-                        if (metered <= 0) metered = 1;
-
-                        if (metered < gc0308::kAimMean && exposure >= gc0308::kExpCeil) {
-                            // 🔆 EXPOSURE IS SPENT, SO USE THE AMPLIFIER.
-                            //
-                            //    This used to break here, on the grounds that
-                            //    gain was a dead lever. That conclusion came
-                            //    from a sweep with the sensor's AEC disabled,
-                            //    which moved mean from 33 to 50 - a 50% change,
-                            //    filed as noise because it was not monotonic.
-                            //
-                            //    Nothing else is left: exposure is at the frame
-                            //    ceiling and the AEC that would normally raise
-                            //    gain is switched off for the still. A lit room
-                            //    arriving at mean 32 is the result.
-                            //
-                            // ⚠️ Bits 5:4 must not both be zero - SetGain keeps
-                            //    that invariant, and it is why some values in
-                            //    the old sweep killed the frame outright.
-                            // kGainStep is declared with the other gc0308 constants.
-                            if (gain >= gc0308::kGainMax) break;
-                            gain += gc0308::kGainStep;
-                            if (gain > gc0308::kGainMax) gain = gc0308::kGainMax;
-                            gc0308::SetGain(i2c_bus_, gain);
-                            ESP_LOGI(TAG, "photo: exposure spent at mean %d - gain -> 0x%02X",
-                                     metered, gain);
-                            continue;
-                        }
-                        const int next = exposure * gc0308::kAimMean / metered;
-                        exposure = next > gc0308::kExpCeil ? gc0308::kExpCeil : next;
+                        last_exposure = exposure;
+                        last_gain = gain;
+                        ESP_LOGI(TAG, "photo: metered to mean %d (exp=%d gain=0x%02X)",
+                                 m, exposure, gain);
+                    } else {
+                        sweep_log = " meter=sensor-unreadable";
+                        s_22 = -1;   // nothing was changed, so nothing is restored
                     }
-                } else {
-                    got = camera_->Capture();
                 }
-                // Unconditionally, before any early return below: the sensor
-                // goes back exactly as we found it, and so does the head.
-                gc0308::EndStill(i2c_bus_, borrowed);
+                const bool got = camera_->Capture();
+
+                // The still is taken; the sensor can have its AEC back. Order
+                // matters only in that 0x22 goes last - it is the switch.
+                if (s_22 >= 0) {
+                    auto* dev = gc0308::Dev(i2c_bus_);
+                    gc0308::Wr(dev, 0x03, static_cast<uint8_t>(s_h));
+                    gc0308::Wr(dev, 0x04, static_cast<uint8_t>(s_l));
+                    gc0308::Wr(dev, 0x50, static_cast<uint8_t>(s_g));
+                    gc0308::Wr(dev, 0xd2, static_cast<uint8_t>(s_d2));
+                    gc0308::Wr(dev, 0x22, static_cast<uint8_t>(s_22));
+                }
                 head_.HoldStill(false);
                 // Unconditionally, like the two above: every path below returns,
                 // and a sensor left streaming is the thing this exists to stop.
@@ -2511,57 +1961,20 @@ public:
                 //    running at the exact moment somebody asks for a photo.
                 //    Three capture windows were missed learning that.
                 std::string diag = gc0308::Describe(i2c_bus_);
-                {
-                    char m[64];
-                    snprintf(m, sizeof(m), " metered=%d exp=%d gain=0x%02X%s", metered, exposure,
-                             gain, borrowed.held ? "" : " (SENSOR NOT HELD)");
-                    diag += m;
-                }
+                diag += sweep_log;
 
                 uint8_t* rgb = nullptr;
                 uint16_t out_w = w, out_h = h;
-                if (fmt == V4L2_PIX_FMT_YUYV || fmt == V4L2_PIX_FMT_UYVY) {
-                    const uint8_t* conv = data;
-                    size_t conv_len = camera_->frame_len();
-                    uint8_t* halved = nullptr;
-                    // 🔻 A VGA FRAME IS AVERAGED DOWN FIRST. The sensor runs at
-                    //    640x480 for the light (twice the row time - see
-                    //    sdkconfig.defaults.stackchan), and the panel is
-                    //    320x240, so the spare resolution is spent on noise and
-                    //    colour rather than thrown away by subsampling.
-                    if (w == 640 && h == 480) {
-                        halved = yuv422::HalveUyvy(data, conv_len, w, h,
-                                                   yuv422::LumaEven(data, conv_len));
-                        if (halved != nullptr) {
-                            conv = halved;
-                            conv_len = static_cast<size_t>(w / 2) * (h / 2) * 2;
-                            out_w = w / 2;
-                            out_h = h / 2;
-                        } else {
-                            ESP_LOGW(TAG, "photo: no PSRAM to halve the frame; sending it whole");
-                        }
-                    }
-                    std::string frame_diag;
-                    rgb = yuv422::ToRgb565(conv, conv_len, out_w, out_h, fmt, &frame_diag);
-                    if (!frame_diag.empty()) diag = frame_diag + "  " + diag;
-                    if (halved != nullptr) heap_caps_free(halved);
-                } else if (fmt == V4L2_PIX_FMT_RGB565) {
-                    // 🎨 THIS SENSOR EMITS BGR565, NOT RGB565.
-                    //
-                    //    With the byte order correct, warm things still rendered
-                    //    blue-green: a face cyan, a lamp blue, and every edge
-                    //    perfectly sharp. Detail intact with colour rotated is
-                    //    the signature of transposed channels, not of exposure,
-                    //    white balance or endianness - all of which were tried
-                    //    first.
-                    //
-                    //    Red is bits 15:11 and blue is bits 4:0, so they trade
-                    //    places; green is centred and stays. Done here rather
-                    //    than in the shared driver because it is a fact about
-                    //    what this sensor emits in this mode.
+                if (fmt == V4L2_PIX_FMT_RGB565) {
+                    // 🎨 NO CHANNEL TRANSPOSE ON THIS DRIVER. esp_video needed
+                    //    red and blue traded; esp32-camera does not, and doing
+                    //    it anyway gives a cyan picture with every edge sharp -
+                    //    which is what transposed channels look like, and what
+                    //    sent this project hunting a white-balance fault it
+                    //    never had.
                     {
                         char rbuf[96];
-                        yuv422::Rgb565Stats(data, static_cast<size_t>(w) * h * 2,
+                        frame::Rgb565Stats(data, static_cast<size_t>(w) * h * 2,
                                             rbuf, sizeof(rbuf));
                         diag += rbuf;
                     }
@@ -2570,16 +1983,23 @@ public:
                     const size_t n = static_cast<size_t>(out_w) * out_h * 2;
                     rgb = static_cast<uint8_t*>(
                         heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+                    // 📋 THE BYTE ORDER IS ALREADY RIGHT, for both consumers.
+                    //
+                    //    esp32-camera byte-swaps RGB565 into its encode buffer
+                    //    for the JPEG encoder, and the panel wants that same
+                    //    order - swapping here scrambles the screen into
+                    //    8-bit-looking colour, and transposing red and blue
+                    //    turns it cyan. Both were tried; both are wrong.
+                    //
+                    // 🔴 AND NEITHER WAS EVER THE BUG. The washed-out screen
+                    //    that sent us looking at byte order was the frame being
+                    //    three stops under: the sensor's gamma stretches the
+                    //    bottom of a starved frame, which lifts the black floor
+                    //    and lays a grey veil over the picture. Metering the
+                    //    still properly took the black floor from 24 to 6 and
+                    //    the veil went with it, on the panel and in the file.
                     if (rgb != nullptr) {
-                        const uint16_t* in = reinterpret_cast<const uint16_t*>(data);
-                        uint16_t* out = reinterpret_cast<uint16_t*>(rgb);
-                        for (size_t i = 0; i < n / 2; i++) {
-                            const uint16_t px = in[i];
-                            out[i] = static_cast<uint16_t>(
-                                ((px & 0x001F) << 11) |    // blue  -> red
-                                 (px & 0x07E0) |           // green stays
-                                ((px & 0xF800) >> 11));    // red   -> blue
-                        }
+                        memcpy(rgb, data, n);
                     }
                 } else {
                     ESP_LOGW(TAG, "frame format 0x%08" PRIx32 " is not one we can convert",
