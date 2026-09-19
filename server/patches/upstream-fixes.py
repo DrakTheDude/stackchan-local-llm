@@ -18,6 +18,46 @@ from pathlib import Path
 ROOT = Path("/opt/xiaozhi-esp32-server")
 
 REPLACEMENTS = [
+    # 🔴 MARKDOWN COMES OFF BEFORE PUNCTUATION DOES.
+    #
+    #    Heard: "Image](https://via.placeholder.com/300x200)", spoken.
+    #
+    #    get_string_no_punctuation_or_emoji strips the leading "[" from a
+    #    markdown link, and MarkdownCleaner's link regex anchors on that exact
+    #    character - so by the time the cleaner runs there is nothing left for
+    #    it to match, and the URL goes to the speaker.
+    #
+    # ⚠️ The cleaned text goes into segment_text ONLY. The next line advances
+    #    processed_chars by len(segment_text_raw), which indexes into the
+    #    stream; cleaning that string in place would shorten it and put every
+    #    later segment out of step.
+    (
+        "core/providers/tts/base.py",
+        """            segment_text = textUtils.get_string_no_punctuation_or_emoji(
+                segment_text_raw
+            )""",
+        """            segment_text = textUtils.get_string_no_punctuation_or_emoji(
+                MarkdownCleaner.clean_markdown(segment_text_raw)
+            )""",
+    ),
+    # 🔴 MISTRAL'S TOOL-CALL TOKEN, SPOKEN ALOUD.
+    #
+    #    Heard: "TOOL_CALLS]Good evening. It's nice to meet you."
+    #
+    #    mistral-nemo emits [TOOL_CALLS] as ordinary content when it calls a
+    #    tool, and it reaches the voice because nothing removes it. Reported as
+    #    the robot "making up a name", which is what it sounds like.
+    #
+    # ⚠️ Fixed HERE, in the cleaner, and not in the streaming tool-call path in
+    #    core/providers/llm/openai/openai.py. That path carries every MCP call
+    #    the robot makes; buffering its first chunks to strip a prefix could
+    #    swallow a real tool call, which is a bad trade for a cosmetic leak.
+    (
+        "core/utils/tts.py",
+        r"""        (re.compile(r'```.*?```', re.DOTALL), ''),  # 代码块""",
+        r"""        (re.compile(r'\[?TOOL_CALLS\]'), ''),  # Mistral's token, leaked as text
+        (re.compile(r'```.*?```', re.DOTALL), ''),  # 代码块""",
+    ),
     # 🔴 THE FEW-SHOT EXAMPLE WAS ANSWERING REAL GREETINGS.
     #
     #    Injected into every conversation to demonstrate direct_answer, it

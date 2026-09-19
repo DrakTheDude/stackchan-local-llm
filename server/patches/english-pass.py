@@ -51,9 +51,17 @@ REPLACEMENTS = [
     (
         "core/providers/vllm/openai.py",
         'question = question + "(请使用中文回复)"',
+        # ⚠️ A DESCRIPTION, NOT A LINE OF SPEECH. Asking this model to answer
+        #    "as if saying it out loud" produced exactly that - "I see a person
+        #    taking a selfie in front of some shelves" - and the chat model read
+        #    it back word for word instead of reacting to it. It recites
+        #    anything that already sounds like something to say, so it gets raw
+        #    material now and has to do the talking itself.
         'question = question + (\n'
-        '            " Answer in one short sentence of plain English, as if saying it"\n'
-        '            " out loud. No markdown, no lists."\n'
+        '            " Describe the scene in one short sentence of plain English:"\n'
+        '            " the people, what they are doing, and the notable things around"\n'
+        '            " them. Do not begin with \\"I see\\" or \\"The image shows\\";"\n'
+        '            " just describe it. No markdown, no lists."\n'
         '        )',
     ),
     # The catch-all tool offered on EVERY turn. A Chinese description on the one
@@ -286,6 +294,39 @@ REPLACEMENTS = [
         '            ";",\n'
         '            "：",\n'
         '        )',
+    ),
+    # 🔴 A FULL STOP ONLY ENDS A SENTENCE IF SOMETHING FOLLOWS IT.
+    #
+    #    Heard aloud, one fragment per breath:
+    #        "Here's the photo you asked for" / "Photo](https://example"
+    #        "com/photo" / "jpg)"
+    #
+    #    The model invented a markdown link to a photo that does not exist. The
+    #    server's MarkdownCleaner would have removed it, but it runs AFTER
+    #    segmentation - and segmentation had already cut the link apart at the
+    #    dots in "example.com/photo.jpg", so there was no link left to match.
+    #
+    # ⚠️ THE SPLIT ON "." IS OURS, from the patch just above, and it was right:
+    #    English sentences had no legal split point at all and the whole reply
+    #    arrived in one block after eighteen seconds of silence. Do not revert
+    #    it. It simply treated every dot as a sentence end, domains and decimals
+    #    included.
+    #
+    #    So the dot splits only when whitespace or the end of the buffer follows
+    #    it, tested against a MASKED COPY - same length, same offsets. The
+    #    streaming path indexes into this string with processed_chars, so
+    #    rewriting it in place would desynchronise the stream.
+    (
+        "core/providers/tts/base.py",
+        """        for punct in punctuations_to_use:
+            pos = current_text.rfind(punct)""",
+        r"""        # A dot inside "example.com" or "96.5" is not a sentence end.
+        # Masked rather than removed: same length, so every offset below - and
+        # processed_chars, which indexes into current_text - still lines up.
+        scan_text = re.sub(r"\.(?=\S)", "\x00", current_text)
+
+        for punct in punctuations_to_use:
+            pos = scan_text.rfind(punct)""",
     ),
     # The memory summariser's own working labels. They are prepended to the
     # transcript it is asked to summarise, so they are in the model's input on

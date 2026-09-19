@@ -1774,9 +1774,24 @@ public:
             "self.camera.show_photo",
             "Take a photo with the robot's camera and show it on the robot's own screen. "
             "Use this when someone asks you to take a picture or show them what you can see. "
-            "If this robot has a vision model, the result also tells you what is in the "
-            "picture, and you should say so in your own words. If it does not, the photo "
-            "simply stays on the device and you cannot see it.",
+            "The picture appears on the robot own screen the moment this returns: "
+            "there is no file and no link, so never write a URL, a filename or "
+            "markdown - twice now a placeholder link has been invented and read "
+            "aloud, character by character. "
+            "If this robot has a vision model, the result carries a `view=` field: "
+            "notes about what is in front of the camera, written by a separate "
+            "model that cannot speak. The camera faces outward, at whoever is "
+            "standing in front of the robot - it is never a picture of you, so "
+            "do not call it one. "
+            "Always say what you can see, in the SAME reply, "
+            "without being asked - announcing the photo and stopping is not enough. "
+            "Never repeat the notes as written; they are in nobody's speaking voice. "
+            "Say what you noticed, the way somebody would who had just looked up. "
+            "For view=Male individual with blonde hair wearing dark clothing, against "
+            "a wooden background with a wall clock - you might say: Got you in front of "
+            "the cabinet, and is that a clock behind your shoulder? "
+            "If there is no `view=` field, the photo simply stays on the device and "
+            "you cannot see it.",
             PropertyList(),
             [this](const PropertyList&) -> ReturnValue {
                 if (camera_ == nullptr) return std::string("camera unavailable");
@@ -2049,14 +2064,35 @@ public:
                     }
                 }
 
-                // The sentence first, the numbers after, so the model has
-                // something plain to say and does not read diagnostics aloud.
+                // 🗣️ THE RESULT IS RAW MATERIAL, NOT A LINE TO READ OUT.
+                //
+                //    It used to say "Photo taken and shown on the robot's
+                //    screen. The camera sees: ..." and that is exactly what came
+                //    out of the speaker, word for word. The tool description
+                //    above already asks for his own words and lost, because the
+                //    result itself demonstrated a finished sentence - and on
+                //    this project a demonstration beats an instruction every
+                //    time.
+                //
+                //    So nothing here is speakable. Labelled, terse, obviously
+                //    data. The other half is in the patch kit, where the vision
+                //    model is asked for a description rather than a sentence.
+                //
+                // 🔬 kPhotoDiag appends the sensor registers. That blob is how
+                //    the exposure sweep results got off the robot without a
+                //    serial capture running at the right moment - and it was
+                //    read aloud twice while it was there. The camera works now,
+                //    so it is off, and Describe() still logs the same numbers
+                //    over serial whenever a photo is taken.
+                constexpr bool kPhotoDiag = false;
+                std::string result = "photo_on_screen=yes";
                 if (!seen.empty()) {
-                    return std::string("Photo taken and shown on the robot's screen. "
-                                       "The camera sees: ") + seen + " [diag " + diag + "]";
+                    result += "; view=" + seen;
                 }
-                return std::string("Photo taken and shown on the robot's screen. [diag ") + diag +
-                       "]";
+                if (kPhotoDiag) {
+                    result += " [diag " + diag + "]";
+                }
+                return result;
             });
         ESP_LOGI(TAG, "registered local camera preview tool");
     }
