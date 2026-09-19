@@ -313,6 +313,40 @@ behaviour to watch for and constrain.
 
 ---
 
+## Hearing you: the ASR side
+
+This page measured chat models for a long time before anybody measured the thing in front of them.
+Speech recognition turned out to be the weakest link on the reference robot — *firmware* came back as
+*fern butter*, on a voice the model had already been tuned against.
+
+| | model | where | VRAM | why |
+|---|---|---|---|---|
+| **default** | `Systran/faster-whisper-small.en` | CPU, int8 | none | runs anywhere, leaves the GPU entirely to the model. The right default and the reason it was chosen |
+| **upgrade** | `Systran/faster-whisper-medium.en` | GPU, float16 | ~1.5 GB | a real gain on accented speech and on quieter, further-away talking. Worth it the moment you have the headroom |
+
+The upgrade is four environment variables — see the comment above the `whisper` service in
+[`server/docker-compose.yml`](../server/docker-compose.yml).
+
+🔴 **Pull the model before you point at it.** `speaches` does **not** download on demand: it serves
+what is in its cache and returns **404** for anything else. Change the model name alone and you get a
+container that starts cleanly, reports CUDA, logs no errors, and fails *every* transcription — the
+only symptom being a robot that has stopped hearing you. Check what it actually has:
+
+```bash
+docker compose exec whisper curl -s localhost:8000/v1/models
+```
+
+⚠️ **An `.en` model is a structural choice, not a size one.** `large-v3-turbo` is better again and
+barely larger — and it is multilingual, so with no language pinned it will sometimes decide you are
+speaking Japanese. An English-only model cannot do that at all. If you go multilingual, pinning the
+language stops being optional.
+
+**Numbers from a second machine are the useful thing here too**, and this table has one row measured
+on one card. If you run the upgrade on something smaller, the interesting figures are the VRAM it
+actually takes alongside your chat model, and whether it still keeps up.
+
+---
+
 ## Helping
 
 Numbers from a different card are the most useful thing you can send. The bench writes a JSON file per

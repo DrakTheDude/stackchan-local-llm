@@ -139,21 +139,58 @@ services:
   #    around it. Change WHISPER_MODEL if you want another language - and expect
   #    to have to say so in the persona too.
   # ---------------------------------------------------------------------------
+  # 🔊 SPEECH TO TEXT. Defaults to a small English model on the CPU, which needs
+  #    no VRAM and runs on any machine.
+  #
+  #    TO PUT IT ON AN NVIDIA GPU AND UP A SIZE - a real accuracy gain on accented
+  #    speech, about 1.5 GB of VRAM, and it stops being the slowest part:
+  #
+  #      1. Pull the model into the cache FIRST (see the warning below):
+  #           docker compose exec whisper python -c \
+  #             "from huggingface_hub import snapshot_download; \
+  #              snapshot_download('Systran/faster-whisper-medium.en')"
+  #      2. Set in your .env:
+  #           WHISPER_IMAGE_TAG=latest-cuda
+  #           WHISPER_MODEL=Systran/faster-whisper-medium.en
+  #           WHISPER_DEVICE=cuda
+  #           WHISPER_COMPUTE=float16
+  #      3. Uncomment the deploy block below, then: docker compose up -d whisper
+  #
+  # 🔴 SPEACHES DOES NOT DOWNLOAD ON DEMAND. It serves what is in its cache and
+  #    returns 404 for anything else. Change the model name without pulling it and
+  #    you get a container that starts cleanly, reports CUDA, logs no errors, and
+  #    fails EVERY transcription - the only symptom being a robot that has stopped
+  #    hearing you. Check with:
+  #      docker compose exec whisper curl -s localhost:8000/v1/models
+  #
+  # ⚠️ AN .en MODEL IS A STRUCTURAL CHOICE, not a size one. large-v3-turbo is
+  #    better again and barely larger, and it is multilingual - and a multilingual
+  #    model with no language pinned will sometimes decide you are speaking
+  #    Japanese. An English-only model cannot.
   whisper:
-    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    image: ghcr.io/speaches-ai/speaches:${WHISPER_IMAGE_TAG:-latest-cpu}
     container_name: stackchan-whisper
     restart: unless-stopped
     ports:
       - "127.0.0.1:8010:8000"
     environment:
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small.en}
-      - WHISPER__INFERENCE_DEVICE=cpu
-      - WHISPER__COMPUTE_TYPE=int8
+      - WHISPER__INFERENCE_DEVICE=${WHISPER_DEVICE:-cpu}
+      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE:-int8}
       # Keep it loaded, same reasoning as OLLAMA_KEEP_ALIVE.
       - WHISPER__TTL=-1
       - ENABLE_UI=false
     volumes:
       - whisper:/home/ubuntu/.cache/huggingface
+    # Uncomment with WHISPER_DEVICE=cuda. Left commented rather than guarded,
+    # because a GPU reservation on a machine without one fails the whole stack.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
     networks: [stackchan]
 
   # ---------------------------------------------------------------------------
