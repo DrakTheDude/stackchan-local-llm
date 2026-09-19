@@ -866,13 +866,31 @@ void StackyFace::ApplyMouth(int w, int curve, int open_h) {
 void StackyFace::Repaint() {
     const auto& p = character::CurrentPalette();
 
+    // 🔑 GEOMETRY FIRST. shape_ holds the expression already scaled - under the
+    //    PREVIOUS body - so a repaint that only re-colours leaves square eyes on
+    //    a round body and the reverse until a reboot. Re-deriving from the name
+    //    is why the name is kept; the next Tick applies it, cache and all.
+    shape_ = ShapeFor(emotion_);
+
     auto eye = [&p](Eye& e) {
         if (e.sclera != nullptr) {
             lv_obj_set_style_bg_color(e.sclera, lv_color_hex(p.sclera), 0);
             lv_obj_set_style_shadow_color(e.sclera, lv_color_hex(p.glow), 0);
         }
-        if (e.pupil != nullptr) lv_obj_set_style_bg_color(e.pupil, lv_color_hex(p.pupil), 0);
-        if (e.glint != nullptr) lv_obj_set_style_bg_color(e.glint, lv_color_hex(p.glint), 0);
+        // 🔑 The corners follow the body too. A pupil is a circle by
+        //    construction, set once in MakeEye - so without this it keeps
+        //    whatever shape it was born with and the eye ends up square-framed
+        //    with a round pupil, or the reverse on the way back.
+        const int corner =
+            character::CurrentLook().radius_unit > 0.0f ? LV_RADIUS_CIRCLE : 0;
+        if (e.pupil != nullptr) {
+            lv_obj_set_style_bg_color(e.pupil, lv_color_hex(p.pupil), 0);
+            lv_obj_set_style_radius(e.pupil, corner, 0);
+        }
+        if (e.glint != nullptr) {
+            lv_obj_set_style_bg_color(e.glint, lv_color_hex(p.glint), 0);
+            lv_obj_set_style_radius(e.glint, corner, 0);
+        }
         // The lids are painted in the GROUND colour - they work by hiding the
         // sclera, so on a white body they have to be white too or they read as
         // bars across his eyes.
@@ -892,6 +910,9 @@ void StackyFace::Repaint() {
     if (mouth_ring_ != nullptr) {
         lv_obj_set_style_border_color(mouth_ring_, lv_color_hex(p.stroke), 0);
         lv_obj_set_style_bg_color(mouth_ring_, lv_color_hex(p.ground), 0);
+        lv_obj_set_style_radius(
+            mouth_ring_,
+            character::CurrentLook().radius_unit > 0.0f ? LV_RADIUS_CIRCLE : 0, 0);
     }
     if (face_ != nullptr) lv_obj_set_style_bg_color(face_, lv_color_hex(p.ground), 0);
 }
@@ -1049,6 +1070,10 @@ void StackyFace::SetupUI() {
 void StackyFace::SetEmotion(const char* emotion) {
     DisplayLockGuard lock(this);
     shape_ = ShapeFor(emotion);
+    if (emotion != nullptr) {
+        strncpy(emotion_, emotion, sizeof(emotion_) - 1);
+        emotion_[sizeof(emotion_) - 1] = '\0';
+    }
     // Look up on a change so the expression lands with a small movement rather
     // than appearing fully formed.
     gaze_countdown_ = 8;

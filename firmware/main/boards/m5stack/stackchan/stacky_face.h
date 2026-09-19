@@ -261,6 +261,12 @@ private:
     lv_timer_t* anim_timer_ = nullptr;
 
     FaceShape shape_{};
+    // 🎭 The expression BY NAME, so a body change can re-derive its geometry -
+    //    shape_ holds it already scaled, and a repaint cannot unscale it.
+    //    Fixed buffer rather than std::string: written from the display path,
+    //    read during a repaint, and string work in the wrong place has rebooted
+    //    this robot before. The longest name in the table is 11 characters.
+    char emotion_[24] = "neutral";
     Mode mode_ = Mode::kIdle;
 
     // Set when the user's transcript arrives, cleared by the first assistant

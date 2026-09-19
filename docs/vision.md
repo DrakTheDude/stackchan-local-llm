@@ -163,6 +163,22 @@ length of VGA's, and that VGA would collect twice the light. VGA was tried and m
 bracketed per photo (`StartStreaming`/`StopStreaming`) rather than running from boot, which was a real
 problem and is fixed: at VGA the permanent 9.8 MB/s of DMA into PSRAM made wake-word detection spotty.
 
+## ⚠️ Do not judge a photograph on the robot's screen
+
+Two reasons, and the second is measurable.
+
+**The panel is small, backlit and usually in a lit room.** A day and a half went into diagnosing a
+"white haze" that turned out to be a reflection in a photograph *of* the screen. If you want to know
+what the camera produced, look at the file — [privacy.md](privacy.md) covers keeping one.
+
+**And full brightness distorts the colour you are trying to judge.** At 100% the colours blow out on
+this panel, including the camera's own photographs shown back on it. Around 80% is where it settles;
+upstream's default of 75 is already in that range, so this only bites if you have turned it up.
+
+Neither of these caused the camera's problems — those were real, and they were settled by measuring
+saved frames rather than by looking at anything. But both are reasons the screen was the wrong
+instrument for the question being asked of it.
+
 ## Why this matters more than it looks
 
 Vision is the one capability where "local" changes the nature of the thing rather than just the bill. A
