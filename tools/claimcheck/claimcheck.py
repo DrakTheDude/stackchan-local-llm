@@ -96,7 +96,13 @@ class Claim:
         # shell, "cmd<newline>| grep" is a syntax error - so a manifest that
         # wrapped a pipe for readability would fail in a way that looks like
         # the claim being false rather than the claim being unreadable.
-        self.prove = " ".join(sect.get("prove", "").split())
+        #
+        # Fold the LINES, not every run of whitespace. `.split()` would also
+        # collapse the two spaces inside grep -q '^  resident:' down to one,
+        # and that proof then fails against a file it should match - which is
+        # the exact confusion the joining exists to prevent.
+        self.prove = " ".join(
+            ln.strip() for ln in sect.get("prove", "").splitlines() if ln.strip())
         self.expect = sect.get("expect", "").strip()
         self.absent = sect.get("absent", "").strip()
         self.tag = sect.get("tag", "").strip()
@@ -104,7 +110,22 @@ class Claim:
         self.timeout = sect.getint("timeout", fallback=30)
         self.needs = sect.get("needs", "").strip()
 
-    def run(self) -> tuple[str, str]:
+    def needs_met(self) -> tuple[bool, str]:
+        """Can this proof even be attempted? Returns (ok, why-not)."""
+        if " " not in self.needs:
+            if shutil.which(self.needs) is None:
+                return False, f"needs `{self.needs}`, which is not on PATH"
+            return True, ""
+        try:
+            p = subprocess.run(self.needs, shell=True, capture_output=True,
+                               text=True, timeout=self.timeout)
+        except Exception as e:                  # noqa: BLE001 - report, never crash
+            return False, f"needs `{self.needs}`, which could not run: {e}"
+        if p.returncode != 0:
+            return False, f"needs `{self.needs}`, which is not satisfied here"
+        return True, ""
+
+    def run(self, cwd: str | None = None) -> tuple[str, str]:
         """Returns (status, detail). Never raises: a broken proof is a result."""
         if not self.prove:
             return FAIL, "no `prove` command in the manifest"
@@ -112,13 +133,27 @@ class Claim:
         # `needs` lets a claim opt out where its tooling is absent, rather than
         # failing. A laptop without docker should not fail the server claims; it
         # should say it could not check them, which is a different statement.
-        if self.needs and shutil.which(self.needs) is None:
-            return SKIP, f"needs `{self.needs}`, which is not on PATH"
+        #
+        # 🔴 A BINARY ON PATH IS NOT THE SAME QUESTION AS "CAN THIS PROOF RUN".
+        #    A claim that asks a running container whether it carries the current
+        #    code needs the CONTAINER, not the docker client. With the stack down
+        #    the old check passed `needs`, ran the proof, and reported that the
+        #    image had lost the code - when the truth was that there was no image.
+        #    A wrong answer in this tool's own failure mode, from the feature
+        #    built to prevent exactly that. Found porting to a large repo.
+        #
+        #    So a `needs` containing a space is run as a command and skips on a
+        #    non-zero exit; one without keeps the old meaning, so every manifest
+        #    written before this behaves identically.
+        if self.needs:
+            ok, why = self.needs_met()
+            if not ok:
+                return SKIP, why
 
         try:
             p = subprocess.run(
                 self.prove, shell=True, capture_output=True, text=True,
-                timeout=self.timeout,
+                timeout=self.timeout, cwd=cwd,
             )
         except subprocess.TimeoutExpired:
             return FAIL, f"proof timed out after {self.timeout}s"
@@ -141,6 +176,45 @@ class Claim:
         return PASS, ""
 
 
+def default_manifest() -> str:
+    """The manifest to use when nobody passed -f.
+
+    CWD-relative first, so a project that keeps claims.ini at its root and runs
+    ./claimcheck.py from there is unchanged. Failing that, the copy filed beside
+    this script - a big repo files its tooling under tooling/, and there the
+    CWD-relative default can never resolve.
+    """
+    if os.path.exists(DEFAULT_MANIFEST):
+        return DEFAULT_MANIFEST
+    beside = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          DEFAULT_MANIFEST)
+    return beside if os.path.exists(beside) else DEFAULT_MANIFEST
+
+
+def project_root(manifest: str) -> str:
+    """Where a proof's relative paths are measured from.
+
+    Proofs say `grep -q x drax/tools/janitor.py`, so they need a fixed origin.
+    Inheriting the caller's cwd is not one: run from a subdirectory and every
+    path-based proof fails at once, each announcing that a feature is missing
+    when the feature is there and only the checker is lost. That is precisely
+    the confusion this tool exists to stop, so it must not be how it behaves.
+
+    The origin is the repo top level when the manifest is in a checkout, and
+    the manifest's own directory otherwise - so a manifest at the root and a
+    manifest filed under tooling/ both measure from the same place.
+    """
+    here = os.path.dirname(os.path.abspath(manifest)) or "."
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=here,
+                             capture_output=True, text=True, timeout=5)
+        if top.returncode == 0 and top.stdout.strip():
+            return top.stdout.strip()
+    except Exception:                           # noqa: BLE001 - git is optional
+        pass
+    return here
+
+
 def load(path: str) -> list[Claim]:
     cp = configparser.ConfigParser(interpolation=None)
     # Keep key case as written; the manifest is read by people.
@@ -153,8 +227,9 @@ def load(path: str) -> list[Claim]:
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Check that this project still has the features it claims.")
-    ap.add_argument("-f", "--manifest", default=DEFAULT_MANIFEST,
-                    help=f"claims file (default: {DEFAULT_MANIFEST})")
+    ap.add_argument("-f", "--manifest", default=None,
+                    help=f"claims file (default: {DEFAULT_MANIFEST}, in the "
+                         f"working directory or beside this script)")
     ap.add_argument("-t", "--tag", action="append", default=[],
                     help="only claims with this tag (repeatable)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -164,7 +239,9 @@ def main() -> int:
                     help="only show anything that is not a pass")
     args = ap.parse_args()
 
-    claims = load(args.manifest)
+    manifest = args.manifest or default_manifest()
+    claims = load(manifest)
+    root = project_root(manifest)
     if args.tag:
         claims = [c for c in claims if c.tag in args.tag]
     if not claims:
@@ -182,7 +259,7 @@ def main() -> int:
     started = time.time()
 
     for c in claims:
-        status, detail = c.run()
+        status, detail = c.run(root)
         if status == FAIL and c.optional:
             status = WARN
         counts[status] += 1
