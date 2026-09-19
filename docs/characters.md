@@ -1,7 +1,9 @@
 # Characters — a skin for the whole robot
 
-> **Status: design note, nothing built.** Written down while the idea was clear.
-> The name is not settled — see the last section.
+> **Status: designed, nothing built.** The ownership question is settled — built-in characters
+> with a shared name, and the server able to override the robot's half later. The prerequisite
+> is tokenising what already exists; the inventory of exactly what that means is below.
+> The name is still not settled — see the last section.
 
 A Winamp skin never only changed the colours. It changed the shape of the buttons, the typeface, the
 way the thing carried itself. You did not think of it as a palette, you thought of it as a different
@@ -28,6 +30,68 @@ So: **a character is a bundle that changes how he looks, sounds, moves and talks
 Today every one of those is a constant or a config key, set independently, with nothing tying them
 together. That is why the reference robot is currently wearing a night-shift-operator persona on
 firmware that knows nothing about it: the two halves have never been introduced.
+
+## ✅ Decided: built in, with the server able to override later
+
+Of the three ownership options weighed below, **both halves with a shared name** is the one to build —
+and the reasoning there stands, so this is the decision and the staging rather than a repeat of it.
+
+**Stage 1 — the shared name.** Built-in characters ship in one binary, chosen in the settings menu,
+the choice kept in NVS. The server holds a file of the same name with the voice and persona. Each side
+is authoritative for what it owns and no new protocol exists yet.
+
+**Stage 2 — the server may override the robot's half.** The server sends a character's look, motion
+and light on connect; it applies while connected and is not persisted. That is what makes *custom*
+characters possible without a firmware build, and it is why the hybrid is worth having:
+
+```
+server override  >  the one chosen in the settings menu  >  the compiled default
+```
+
+Disconnect and he returns to the selected built-in, so a character pushed for a demo cannot strand the
+robot wearing it. Pull the network entirely and he is still himself — he just stops talking.
+
+### 🔑 The face is not sprites, and it changes what stage 2 costs
+
+Worth stating plainly, because the note below assumes otherwise. The face is drawn with LVGL
+primitives — `lv_line` point arrays and stroke widths — and the whole expression is eight small
+fields:
+
+```cpp
+struct FaceShape {
+    EyeShape left, right;
+    BrowShape brow_l, brow_r;
+    int8_t gaze_x, gaze_y;
+    uint8_t mouth_w;
+    int8_t mouth_curve;   // + smile, - frown
+    uint8_t mouth_open;
+};
+```
+
+So a character is **a few hundred bytes of numbers**. No image assets, no assets-partition rebuild, no
+`-WithAssets` flash to try one on. Custom characters do not need a data path on the device at all —
+the connect message *is* the data path. That removes most of what made stage 2 look expensive.
+
+### Partial characters merge
+
+A character sets only the fields it cares about; the rest come from the default. "Just a palette" is a
+valid character, and so is "the default, but he glances three times as often" — which is what keeps
+the examples short. *Heavily caffeinated* is six numbers and a colour.
+
+### What still has to be decided
+
+- ⚠️ **How much of the arrays a character may set.** `kBlink[]` is a six-frame curve; the glance
+  targets are lists of five and three. Fixed-size, at today's sizes, is the obvious start — a character
+  that cannot change its own blink is missing something expressive, but one that can push
+  arbitrary-length arrays at the device is a different kind of problem.
+- ⚠️ **Whether a character's geometry is pre- or post-`Scaled()`.** Face constants run through
+  `Scaled()` at 1.25×. Raw numbers landing in scaled slots change proportion as well as position, and
+  the failure is silent and looks like a design choice. Pick one, state it in the schema.
+- ⚠️ **Whether a character can be switched by voice.** Genuinely fun, and a mutation — which this
+  project is careful about. The blast radius is his own face, which is the argument for; "be someone
+  else" working by accident is the argument for deciding it on purpose.
+- ⚠️ **What happens mid-sentence.** Switching while he speaks, or mid-glance, should either finish the
+  gesture or apply at the next idle. The second is simpler and looks deliberate.
 
 ## What tokenising actually involves
 
@@ -135,9 +199,10 @@ machine, so the first version will be "pick the look and motion on the robot, ed
 persona in the config". One switch for both is the ownership question above, and it is the thing that
 makes this feel finished rather than clever.
 
-Custom characters, written by owners rather than shipped with the firmware, are a later question
-again: they need a data path (the assets partition, or handed over by the server on connect) and none
-of that should be designed until the built-in ones work.
+Custom characters, written by owners rather than shipped with the firmware, are stage 2 above. They
+need a data path, and the one that costs nothing is the server handing the bundle over on connect —
+**not** the assets partition. A character is numbers, not sprites (see the decision section), so it
+fits in a message. None of it should be built until the built-in ones work.
 
 ## Before any of this, one prerequisite
 
