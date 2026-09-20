@@ -40,3 +40,7 @@ __pycache__/
 deploy/check-deps.log
 deploy/check-deps-error.txt
 screens/
+
+# 🔴 Vision bench descriptions are of somebody's room. Metrics are publishable;
+#    what the camera saw is not.
+tools/model-bench/results/**/*.local.txt

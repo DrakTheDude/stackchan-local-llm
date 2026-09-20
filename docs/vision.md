@@ -56,14 +56,41 @@ robot's camera actually produces:
 `qwen2.5vl:3b` was right every time and `moondream` was wrong every time, on a picture with two shapes
 in it. The extra 2.9 GB buys a model that can be believed.
 
-⚠️ **This was a synthetic frame, and that limits what it proves.** It shows a model of that size can
-describe a picture of that size, and what it costs to keep resident. A real GC0308 frame is noisy, low
-contrast and tone-mapped on the device before it is sent — whether these models cope with *that* needs
-a real photo, which needs the camera path to exist first.
-
 ⚠️ **The first measurement said 0.1 s and was wrong.** Three identical requests measure Ollama's prompt
 cache, not the model. Camera frames are never identical, so the honest test varies the image — which
 moved the figure to 0.35 s. Any vision benchmark that reuses one picture is measuring a cache.
+
+## 🔴 On real photographs, the exposure decides whether the model is honest
+
+The table above used a **synthetic** frame, and said so, because the camera did not work yet. It does
+now, so [`tools/model-bench/vision-bench.py`](../tools/model-bench/vision-bench.py) re-ran the same
+models against **fifteen real frames off the robot**, every request a different picture.
+
+**The timing held exactly: 0.33 s median, warm, 4.1 GB resident, all on the card.** The synthetic
+number was honest.
+
+**The accuracy did not hold, and it failed in the worst available way.** The frames span a morning
+during which the camera metering fix landed, so they divide cleanly by exposure:
+
+| frames | mean luma | what `qwen2.5vl:3b` said |
+|---|---|---|
+| before the fix | **7 – 33** | *"A person is holding a gun in a dark room."* · *"A hand holding a lit cigarette."* · *"a red, glowing object"* |
+| after the fix | **88 – 134** | specific, checkable things that were actually in the room — objects, furniture, what the person was doing |
+
+Same model, same card, same prompt, same room, one morning apart. **The variable was the exposure.**
+
+🔴 **An underexposed frame does not produce "I cannot see". It produces a confident sentence about a
+gun.** The model has no way to say the picture was too dark, so it describes the noise — and the robot
+then *says that out loud*, in a room where it is not true. A vision feature that is 90% right and
+10% alarming is worse than no vision feature, because you cannot tell the two apart from across the
+desk.
+
+**So the camera work was not a prerequisite for vision — it was the larger half of it.** Three days of
+[exposure work](camera.md) bought more accuracy than any change of model could have. If your
+descriptions read as nonsense, photograph something and check the frame before you change the model:
+below roughly 35 mean luma this model is guessing, and it does not sound like it is guessing.
+
+`moondream:1.8b` was wrong on every frame at every exposure, exactly as it was on the synthetic one.
 
 ## It fits alongside the chat model
 
