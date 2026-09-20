@@ -92,19 +92,44 @@ below roughly 35 mean luma this model is guessing, and it does not sound like it
 
 `moondream:1.8b` was wrong on every frame at every exposure, exactly as it was on the synthetic one.
 
-## It fits alongside the chat model
+## It fits alongside the chat model — above 8 GB
 
-Both stay resident together; nothing is evicted and no swap cost is paid per photo:
+On a big card both stay resident, nothing is evicted, and no swap cost is paid per photo:
 
 | card | chat model | vision model | total |
 |---|---|---|---|
-| **8 GB** | `qwen3:8b` 5.6 GB | `moondream:1.8b` 1.2 GB | 6.8 GB — fits, but with the weaker eye |
 | **12 GB** | `qwen3:8b` 5.6 GB | `qwen2.5vl:3b` 4.1 GB | 9.7 GB |
 | **16 GB** | `gpt-oss:20b` 12.9 GB | `moondream:1.8b` 1.2 GB | 14.1 GB |
 | **24 GB** | `mistral-nemo:12b` 12.4 GB | `qwen2.5vl:3b` 4.1 GB | **16.5 GB**, room to spare |
 
-The 8 GB row is the awkward one: it fits only by taking the vision model that gets things wrong. At
-12 GB you can have both a chat model that scores 100% and an eye that can be trusted.
+### 🔴 At 8 GB it is a choice, and it was measured on a real 8 GB card
+
+Loading the vision model **evicts** a chat model that does not leave room for it. Measured on an
+RTX 5060 Mobile, loading each pair and then asking the card what is actually on it:
+
+| chat model | resident | + `qwen2.5vl:3b` (2.9 GB here) | |
+|---|---|---|---|
+| `granite4:micro` | 2.5 GB | 5.4 GB | **both stay** |
+| `qwen3:4b` | 3.2 GB | 6.1 GB | **both stay** |
+| `granite4:tiny-h` | 4.4 GB | — | ⚠️ chat model **evicted** |
+| `qwen3:8b` | 5.6 GB | — | ⚠️ chat model **evicted** |
+
+So on 8 GB the trade is real: **vision costs you the good chat model.** `qwen3:8b` is the one that
+scores 100% on tool calling, and it cannot share the card with an eye. What fits beside vision is a
+3-4 GB model scoring in the seventies — and [the noise floor](model-floor.md) says treat that band
+loosely.
+
+Note the vision model measures **2.9 GB here against 4.1 GB on the 4090**: Ollama sizes context to the
+card it finds, so a figure from a big card overstates what a small one needs.
+
+⚠️ **Eviction is silent.** Ollama does not warn you; the robot simply reloads a model on the next
+sentence and takes seconds to answer. If vision is on and he became slow to talk, this is why — and
+`tools/model-bench/vision-bench.py --with-chat` is what tells you, by asking the card rather than
+adding up the sizes.
+
+**And you can simply not.** With no vision model configured the robot photographs and shows the
+picture, exactly as before, and says nothing about it. On 8 GB that is a reasonable choice rather
+than a degraded one.
 
 ## What it took, and what nearly went wrong
 

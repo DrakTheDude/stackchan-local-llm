@@ -13,7 +13,7 @@ right — which is why this is a matrix rather than a recommendation.
 
 | your card | chat model | why | with an eye too |
 |---|---|---|---|
-| **8–12 GB** | **`qwen3:8b`**, reasoning **off** | 100% on all 21 cases, fits in 5.6 GB, speaks in 0.08 s | `+ moondream:1.8b` (1.2 GB) at 8 GB; `+ qwen2.5vl:3b` (4.1 GB) once you have 12 |
+| **8–12 GB** | **`qwen3:8b`**, reasoning **off** | 100% on all 21 cases, fits in 5.6 GB, speaks in 0.08 s | ⚠️ **at 8 GB, not at the same time** — vision evicts it. Either `qwen3:8b` and no eye, or `qwen3:4b` + `qwen2.5vl:3b` at 6.1 GB. Measured, in [vision.md](vision.md) |
 | **12–20 GB** | **`mistral-nemo:12b`** | 100%, speaks in 0.09 s, and does not reason at all so there is nothing to switch off | `+ qwen2.5vl:3b` → 16.5 GB total |
 | **20 GB and up** | **`mistral-nemo:12b`** still | the extra card buys vision and headroom, not a better talker | `+ qwen2.5vl:3b`, comfortably |
 
@@ -66,6 +66,25 @@ ones where reasoning hurts most.
 
 **A mobile card is not a desktop card with fewer gigabytes.** The 5060 ran a 3B at 84 tok/s against the
 4090's 209 — 40%, roughly the memory-bandwidth ratio. Everything scales down together.
+
+### 🔴 How much of this table is noise
+
+The 5060 was swept twice, a day apart — same card, same models, nothing changed between them. So
+everything that moved is measurement noise, and now it has a number:
+
+| column | run-to-run swing | read it as |
+|---|---|---|
+| **tokens/second** | **under 1%** | **real.** A difference here is a difference |
+| tool score | ±2 cases in 21 (−12% to +11%) | **one run is one sample.** `granite4:tiny-h` scored 90%, then 100% |
+| time to first spoken word | −18% to **+74%** | the *shape* is real — reasoning costs seconds, not reasoning does not — the figure is not |
+| cold load | −67% to +100% | disk cache, nearly meaningless |
+
+So **compare cards by tokens/second, and read tool percentages as a band rather than a number.** Two
+models four points apart on this page are tied. The 100%-against-83% gaps are real; the
+90%-against-86% ones are not — and this page previously invited both readings equally.
+
+⚠️ It is also the floor any *experiment* against this bench has to clear. Something that moves
+tokens/second by 5% is visible. Something that claims two more tool cases has measured nothing.
 
 ## The greeting is the test nobody writes
 

@@ -88,6 +88,30 @@ def unload(ollama, model):
         pass
 
 
+def keep_resident(ollama, model, timeout):
+    """Load a chat model and hold it on the card.
+
+    🔑 THIS IS THE CONDITION THAT MATTERS, and measuring vision on an empty card
+       answers a question nobody has. The robot always has a chat model loaded -
+       that is what he talks with - so what an owner needs to know is whether
+       vision fits NEXT TO it. On a 24 GB card that is uninteresting. On 8 GB it
+       is the whole decision.
+
+    Ollama will run a model that does not fit by keeping part of it in system
+    RAM, silently, several times slower. So both residencies are reported and
+    the pair is only called a fit when BOTH are fully on the card.
+    """
+    try:
+        post(ollama.rstrip("/") + "/api/generate", {
+            "model": model, "prompt": "hi", "stream": False,
+            "keep_alive": "10m", "options": {"num_predict": 1},
+        }, timeout)
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"    could not load chat model {model}: {str(e)[:70]}")
+        return False
+
+
 def describe(ollama, model, image_b64, prompt, timeout):
     """One photo in, one sentence out. Returns (seconds, text)."""
     started = time.monotonic()
@@ -111,6 +135,8 @@ def main():
     p.add_argument("--prompt", default=DEFAULT_PROMPT)
     p.add_argument("--timeout", type=int, default=180)
     p.add_argument("--warm", type=int, default=1, help="frames used to warm up, not measured")
+    p.add_argument("--with-chat", default="", dest="with_chat",
+                   help="keep this chat model resident while measuring - the real condition")
     a = p.parse_args()
 
     frames = sorted([f for f in Path(a.frames).iterdir()
@@ -156,7 +182,14 @@ def main():
 
     for model in models:
         unload(a.ollama, model)
-        print(f"--- {model}")
+        chat_res = {}
+        if a.with_chat:
+            # Loaded BEFORE the vision model, in the order the robot does it:
+            # he is talking first and takes a photo during the conversation.
+            unload(a.ollama, a.with_chat)
+            if keep_resident(a.ollama, a.with_chat, a.timeout):
+                chat_res = residency(a.ollama, a.with_chat)
+        print(f"--- {model}" + (f"  (alongside {a.with_chat})" if a.with_chat else ""))
         try:
             cold, first = describe(a.ollama, model, encoded[0], a.prompt, a.timeout)
         except Exception as e:  # noqa: BLE001
@@ -185,7 +218,31 @@ def main():
               f"(min {min(times):.2f} max {max(times):.2f}, n={len(times)})")
         if res:
             fit = "all on GPU" if res.get("fully_on_gpu") else "SPILLED TO CPU"
-            print(f"    resident {res.get('resident_gb')} GB, {res.get('on_gpu_gb')} GB on card - {fit}")
+            print(f"    vision  {res.get('resident_gb')} GB, {res.get('on_gpu_gb')} GB on card - {fit}")
+        if a.with_chat:
+            # 🔴 RE-READ, AND NEVER FALL BACK TO THE EARLIER READING.
+            #
+            #    This said `residency(...) or chat_res` for one run, and that
+            #    `or` is the whole bug: when the chat model has been EVICTED the
+            #    fresh read is empty, so it silently reported the pre-eviction
+            #    value and declared the pair a fit. It printed "8.5 GB on the
+            #    card together - fits" for an 8 GB card, which is impossible,
+            #    and nothing about the output looked wrong.
+            #
+            #    Eviction is the interesting answer here, not an error case: it
+            #    is precisely what an owner needs to know before choosing a chat
+            #    model. A benchmark that cannot report it is worse than none.
+            chat_res = residency(a.ollama, a.with_chat)
+            if chat_res:
+                cfit = "all on GPU" if chat_res.get("fully_on_gpu") else "SPILLED TO CPU"
+                print(f"    chat    {chat_res.get('resident_gb')} GB, "
+                      f"{chat_res.get('on_gpu_gb')} GB on card - {cfit}")
+            else:
+                print(f"    chat    {a.with_chat} was EVICTED to make room - "
+                      f"the two do not fit together")
+            both = bool(res.get("fully_on_gpu") and chat_res.get("fully_on_gpu"))
+            total = round((res.get("on_gpu_gb", 0) or 0) + (chat_res.get("on_gpu_gb", 0) or 0), 1)
+            print(f"    PAIR    {'fits, ' + str(total) + ' GB together' if both else 'DOES NOT FIT'}")
         print(f"    first two: {texts[0][1][:90]!r}")
         if len(texts) > 1:
             print(f"               {texts[1][1][:90]!r}")
@@ -209,7 +266,18 @@ def main():
             "per_photo_max_s": round(max(times), 2),
             **res,
         }
+        if a.with_chat:
+            out["alongside_chat_model"] = a.with_chat
+            out["chat_resident_gb"] = chat_res.get("resident_gb")
+            out["chat_on_gpu_gb"] = chat_res.get("on_gpu_gb")
+            out["chat_evicted"] = not bool(chat_res)
+            out["pair_fits_on_gpu"] = bool(
+                res.get("fully_on_gpu") and chat_res.get("fully_on_gpu"))
+            out["pair_on_gpu_gb"] = round(
+                (res.get("on_gpu_gb", 0) or 0) + (chat_res.get("on_gpu_gb", 0) or 0), 1)
         slug = model.replace(":", "-").replace("/", "-")
+        if a.with_chat:
+            slug += "-with-" + a.with_chat.replace(":", "-").replace("/", "-")
         (results_dir / f"vision-{slug}.json").write_text(
             json.dumps(out, indent=2) + "\n", encoding="utf-8")
         unload(a.ollama, model)

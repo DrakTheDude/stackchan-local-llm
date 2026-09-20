@@ -1,0 +1,21 @@
+{
+  "model": "qwen2.5vl:3b",
+  "hardware": "RTX 5060 Mobile 8GB",
+  "base_url": "http://<your-llm-host>:11434",
+  "prompt": "What do you see? One sentence.",
+  "frames_measured": 14,
+  "real_camera_frames": true,
+  "cold_first_look_s": 6.75,
+  "per_photo_warm_s": 1.5,
+  "per_photo_min_s": 1.42,
+  "per_photo_max_s": 1.64,
+  "resident_gb": 2.9,
+  "on_gpu_gb": 2.9,
+  "fully_on_gpu": true,
+  "alongside_chat_model": "granite4:tiny-h",
+  "chat_resident_gb": null,
+  "chat_on_gpu_gb": null,
+  "chat_evicted": true,
+  "pair_fits_on_gpu": false,
+  "pair_on_gpu_gb": 2.9
+}

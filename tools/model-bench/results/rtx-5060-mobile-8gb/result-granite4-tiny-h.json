@@ -4,16 +4,16 @@
   "base_url": "http://<your-llm-host>:11434/v1",
   "temperature": 0.75,
   "thinking": "on (model default)",
-  "cold_load_s": 4.6,
-  "ttft_s": 0.15,
-  "time_to_first_spoken_word_s": 0.15,
+  "cold_load_s": 5.9,
+  "ttft_s": 0.13,
+  "time_to_first_spoken_word_s": 0.13,
   "silence_s": 0.0,
   "max_tokens": 1200,
-  "tool_score": "19/21",
-  "tool_pct": 90,
+  "tool_score": "21/21",
+  "tool_pct": 100,
   "tools_supported": true,
-  "median_latency_s": 0.29,
-  "median_tok_s": 83.9,
+  "median_latency_s": 0.31,
+  "median_tok_s": 96.7,
   "resident_gb": 4.4,
   "vram_gb": 4.4,
   "on_gpu_pct": 100,
@@ -32,12 +32,9 @@
     },
     {
       "case": "two-args",
-      "passes": 1,
+      "passes": 3,
       "of": 3,
-      "notes": [
-        "answered from its own head instead of calling a tool",
-        "answered from its own head instead of calling a tool"
-      ]
+      "notes": []
     },
     {
       "case": "no-args",
