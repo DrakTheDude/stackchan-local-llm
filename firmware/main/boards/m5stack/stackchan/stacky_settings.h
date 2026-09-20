@@ -58,6 +58,21 @@ public:
         std::function<bool()> get_mic_muted;
         std::function<void(bool)> set_camera_off;
         std::function<bool()> get_camera_off;
+        // 📐 Head trim - the one genuinely per-robot number, and until now the
+        //    only setting that needed a rebuilt firmware to change, for
+        //    something you decide by looking at him.
+        //
+        //    `nudge_trim` applies LIVE and does not persist: the head re-centres
+        //    on the new value so the change can be seen. `close_trim(true)`
+        //    saves; `close_trim(false)` puts back whatever the screen opened
+        //    with. Saving on every tap would leave a robot stuck mid-adjustment
+        //    if you walked away, which is the one state nobody chooses.
+        std::function<std::pair<int, int>()> get_trim;   // pan, tilt, in counts
+        std::function<void(int, int)> nudge_trim;        // deltas, applied live
+        // true = save. The pair is what the page opened with, handed back so a
+        // revert does not need the board to keep state that is only meaningful
+        // while one screen is up.
+        std::function<void(bool, int, int)> close_trim;
         // The About page, as label/value pairs rather than formatted lines. The
         // page needs to style the two halves differently and wrap the value
         // inside its own column - neither of which is possible once it has been
@@ -77,6 +92,9 @@ public:
 private:
     void BuildList();
     void BuildAbout();
+    void BuildTrim();
+    // Repaints the two numbers. Called after every nudge and on every open.
+    void ShowTrim();
     // Repopulates the About rows. Called on every open, because the address can
     // change under a robot that has been running for a week.
     void FillAbout();
@@ -92,6 +110,12 @@ private:
     lv_obj_t* list_ = nullptr;     // the scrolling rows
     lv_obj_t* about_ = nullptr;      // the About page, shown in place of the list
     lv_obj_t* about_rows_ = nullptr;  // repopulated each time it is opened
+    lv_obj_t* trim_ = nullptr;         // the head trim page, same idea
+    lv_obj_t* trim_pan_value_ = nullptr;
+    lv_obj_t* trim_tilt_value_ = nullptr;
+    // What the trim was when the page opened, so Back can put it back.
+    int trim_was_pan_ = 0;
+    int trim_was_tilt_ = 0;
     lv_obj_t* volume_value_ = nullptr;
     lv_obj_t* bright_value_ = nullptr;
     lv_obj_t* mic_switch_ = nullptr;

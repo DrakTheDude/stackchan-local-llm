@@ -83,14 +83,33 @@ English-first board support, with every hardware assumption written down next to
   covered by the chat bar; the preview teardown does un-hide the face on every path. The instrument
   that settled it stays: every mode change logs old → new and who asked, and both preview edges log
   their task. They are not the same task, which is worth knowing on its own.
-- ⬜ **Diagnose the boot-time I²C glitch, rather than only surviving it.** About ten seconds into every
-  boot, as Wi-Fi associates and the wake-word engine starts, the shared bus NAKs for a few hundred
-  milliseconds. Both chips on it go unreachable, and two separate faults came out of that one window: a
-  silent amplifier (`esp_codec_dev_open` reports success while its register writes go nowhere) and a
-  servo rail "failure" that was really an unreadable status register. Both are now handled — the codec
-  checks the amp answered and retries, the PY32 refuses to write a guess — but nothing here explains
-  *why* the bus stalls. Candidates: the PMIC, contention from the LED latch, or the radio's power draw.
-  Worth knowing before telling other people their hardware is fine.
+- ✅ **The boot-time I²C glitch, diagnosed. It is not a glitch, and nothing NAKs.** Every failure in
+  that window is `ESP_ERR_TIMEOUT`, and **the same device answers immediately on a 250ms retry**:
+
+  ```
+  W i2c watch: no answer from pmic=ESP_ERR_TIMEOUT(answered at 250ms)
+  W i2c watch: back after 47ms
+  W i2c watch: 3 outage(s) in 45s, worst 52ms
+  ```
+
+  🔑 **The bus is busy, not broken.** The devices are present and answering throughout; a 20ms budget
+  is simply not enough to get a slot while Wi-Fi is associating. `ESP_ERR_TIMEOUT` means the
+  transaction never got out; `ESP_ERR_NOT_FOUND` would mean the device declined to answer. **Not one
+  NOT_FOUND has ever been recorded here.** Three outages a boot, ~50ms each, at the auth/assoc
+  transitions — not the "few hundred milliseconds" this item claimed, which came from an earlier
+  instrument that counted its own retries into the window it was measuring.
+
+  That re-reads both historical faults as one thing: a **short timeout reported as a missing device**.
+  The amplifier whose register writes "went nowhere" and the rail status register that was
+  "unreadable" were both timeouts. Which is why the two existing mitigations are right and now have a
+  mechanism — the codec retries, the PY32 refuses to write a guess — and why the fix for anything
+  similar is a longer timeout, not a hardware hunt.
+
+  ⬜ **Still open underneath it:** *which* task holds the bus. The LED ring writes 12 pixels and a
+  latch to the PY32 continuously, the touch panel is polled, and the camera shares the bus — any of
+  them could be the holder, and the correlation with Wi-Fi association suggests the holder simply
+  takes longer to finish while the CPU is busy. Knowing the mechanism was the part that changes what
+  anybody does about it.
 - ✅ **Per-unit servo calibration.** Each robot's factory centre is read from its own NVS at boot —
   the keys `zero_pos_1` / `zero_pos_2`, found by searching the partition rather than by assuming a
   namespace name, since the name belongs to the vendor's app and one sample is not a convention.
@@ -141,14 +160,18 @@ English-first board support, with every hardware assumption written down next to
   registers and the privacy switches — fixed order, fixed labels, so two units produce two reports that
   **diff**. Deliberately no MAC address and no Wi-Fi name: a report meant to be pasted into an issue
   must not carry an identifier for the person pasting it.
-- 🟡 **Finish moving settings onto the robot.** The on-screen menu exists and took the ones that matter
-  most — Wi-Fi & server, volume, brightness, the self-check, About, and the privacy switches. What is
-  still scattered: the **pan/tilt trim** is a rebuild, and it is the one number every owner has to set for
-  their own robot; the ambient **status source** URL and token are typed in over USB serial — a home, but
-  not an on-screen one, and the deliberate reason is that the token should not be somewhere a guest can
-  read it off the robot's own face; screen and standby timeouts are compiled in.
-  The trim is the awkward one — it wants a live preview ("move until he looks straight"), which is a
-  different kind of screen from a list of switches.
+- 🟡 **Finish moving settings onto the robot.** The on-screen menu has Wi-Fi & server, volume,
+  brightness, body and mood, the self-check, About, the privacy switches — and now the **head trim**,
+  which was the one number every owner had to set for their own robot by editing a Kconfig and
+  rebuilding the firmware, for something you decide by looking at him. It is a live preview, as it had
+  to be: two rows of `[-] value [+]`, the head re-centres on every tap, and he is **held still** for the
+  whole page, because a head that glances away on its own schedule while you are judging whether it is
+  straight makes the screen useless. Save writes to NVS; Back puts back what the page opened with. The
+  build setting survives as the *default*, so an untrimmed robot behaves exactly as before.
+
+  What is left: the ambient **status source** URL and token are typed in over USB serial — a home, but
+  not an on-screen one, and deliberately so, because a token should not be somewhere a guest can read
+  it off the robot's own face. Screen and standby timeouts are still compiled in.
   ⚠️ A page served on the LAN would be easier to type into, and is a listening socket on a device whose
   selling point is that it does not phone anywhere. If it is ever built, binding, authentication and
   being off by default are deliberate decisions, not afterthoughts.

@@ -19,6 +19,31 @@ int g_zero_pan = SCS_FALLBACK_ZERO_PAN;
 int g_zero_tilt = SCS_FALLBACK_ZERO_TILT;
 bool g_fallback = true;
 
+// The bench trim. The build setting is the DEFAULT; a stored value replaces it
+// at Initialize(). Ours, unlike the factory keys above, so it gets a namespace
+// we chose and can open by name.
+int g_pan_trim = SCS_PAN_TRIM_COUNTS;
+int g_tilt_trim = SCS_TILT_TRIM_COUNTS;
+constexpr const char kTrimNs[] = "stacky";
+
+void LoadTrim() {
+    nvs_handle_t h;
+    if (nvs_open(kTrimNs, NVS_READONLY, &h) != ESP_OK) {
+        return;   // never trimmed on this robot; the build setting stands
+    }
+    int32_t pan = 0, tilt = 0;
+    const bool got_pan = nvs_get_i32(h, "pan_trim", &pan) == ESP_OK;
+    const bool got_tilt = nvs_get_i32(h, "tilt_trim", &tilt) == ESP_OK;
+    nvs_close(h);
+    if (got_pan) g_pan_trim = std::clamp<int>(pan, -ScsServo::kMaxTrimCounts,
+                                              ScsServo::kMaxTrimCounts);
+    if (got_tilt) g_tilt_trim = std::clamp<int>(tilt, -ScsServo::kMaxTrimCounts,
+                                                ScsServo::kMaxTrimCounts);
+    if (got_pan || got_tilt) {
+        ESP_LOGI(TAG, "bench trim from NVS: pan %+d tilt %+d", g_pan_trim, g_tilt_trim);
+    }
+}
+
 // 🔎 THE KEYS ARE FOUND BY SEARCHING, NOT BY NAMING A NAMESPACE.
 //
 //    The factory stores the calibration under namespace INDEX 2 - which is an
@@ -99,17 +124,41 @@ void LoadFactoryCentres() {
     g_zero_tilt = tilt;
     g_fallback = false;
     ESP_LOGI(TAG, "factory centres from NVS '%s': pan=%d tilt=%d (trim %+d/%+d)",
-             ns, g_zero_pan, g_zero_tilt, SCS_PAN_TRIM_COUNTS, SCS_TILT_TRIM_COUNTS);
+             ns, g_zero_pan, g_zero_tilt, g_pan_trim, g_tilt_trim);
 }
 
 }  // namespace
 
 int ScsServo::CenterFor(uint8_t id) {
-    return (id == SCS_ID_TILT) ? g_zero_tilt + SCS_TILT_TRIM_COUNTS
-                               : g_zero_pan + SCS_PAN_TRIM_COUNTS;
+    return (id == SCS_ID_TILT) ? g_zero_tilt + g_tilt_trim
+                               : g_zero_pan + g_pan_trim;
 }
 
 bool ScsServo::calibration_is_fallback() { return g_fallback; }
+
+int ScsServo::PanTrim() { return g_pan_trim; }
+int ScsServo::TiltTrim() { return g_tilt_trim; }
+
+void ScsServo::SetTrim(int pan_counts, int tilt_counts) {
+    g_pan_trim = std::clamp(pan_counts, -kMaxTrimCounts, kMaxTrimCounts);
+    g_tilt_trim = std::clamp(tilt_counts, -kMaxTrimCounts, kMaxTrimCounts);
+}
+
+void ScsServo::SaveTrim() {
+    nvs_handle_t h;
+    if (nvs_open(kTrimNs, NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGE(TAG, "could not open NVS to save the trim");
+        return;
+    }
+    nvs_set_i32(h, "pan_trim", g_pan_trim);
+    nvs_set_i32(h, "tilt_trim", g_tilt_trim);
+    // Committed here rather than left to the handle closing: a trim that
+    // survived until the next reboot and no further would look like it saved.
+    const esp_err_t err = nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "bench trim saved: pan %+d tilt %+d (%s)", g_pan_trim, g_tilt_trim,
+             esp_err_to_name(err));
+}
 
 ScsServo::ScsServo() {}
 
@@ -124,6 +173,10 @@ bool ScsServo::Initialize() {
 
     // Before the bus, because everything below - centring, the travel clamps -
     // is expressed relative to this unit's own zero.
+    // Trim first, because LoadFactoryCentres reports the pair together and a
+    // line that printed the build default next to the stored centre would be
+    // wrong in exactly the place somebody checks it.
+    LoadTrim();
     LoadFactoryCentres();
 
     uart_config_t cfg = {};

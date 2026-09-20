@@ -110,6 +110,13 @@ public:
     // whichever task is taking the photo, read by the motion task.
     void HoldStill(bool on) { hold_still_ = on; }
 
+    // 📐 Move to the centre ONCE, from the motion task, even while held still.
+    //    The trim screen holds the head still - it must not glance away while
+    //    you are judging whether he is straight - and then needs the one move
+    //    that shows what the nudge did. Same volatile-flag treatment as
+    //    square_stage_: set from the LVGL task, cleared by the motion task.
+    void Recentre() { recentre_ = true; }
+
 private:
     static void MotionTask(void* arg);
     // Returns how long to wait before the next step, in ms.
@@ -134,6 +141,7 @@ private:
     volatile int square_stage_ = 0;
     volatile bool thinking_ = false;
     volatile bool hold_still_ = false;
+    volatile bool recentre_ = false;
     int think_stage_ = -1;      // -1 = not in the thinking script
     float think_pan_ = 0.0f;
     int64_t manual_until_us_ = 0;

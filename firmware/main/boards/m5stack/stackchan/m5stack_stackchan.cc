@@ -946,6 +946,37 @@ private:
             ESP_LOGW(TAG, "camera %s", off ? "OFF" : "on");
         };
 
+        // 📐 The head trim, live. Every nudge changes the centre and re-centres
+        //    him on it, so the adjustment is something you watch rather than a
+        //    number you compute.
+        //
+        // 🔴 HELD STILL FOR THE WHOLE PAGE. Without it he keeps glancing on his
+        //    own schedule, and a head that wanders while you are deciding
+        //    whether it is straight makes the screen useless. The hold is
+        //    released on BOTH exits, Save and Back, because a robot left frozen
+        //    by a settings screen looks exactly like a robot that has crashed.
+        a.get_trim = []() {
+            return std::pair<int, int>(ScsServo::PanTrim(), ScsServo::TiltTrim());
+        };
+        a.nudge_trim = [this](int d_pan, int d_tilt) {
+            head_.HoldStill(true);
+            ScsServo::SetTrim(ScsServo::PanTrim() + d_pan, ScsServo::TiltTrim() + d_tilt);
+            head_.Recentre();
+        };
+        //    The page hands back what it OPENED with rather than the board
+        //    remembering it: the board would then be keeping state that only
+        //    means anything while one screen is up, and a second way in would
+        //    quietly get it wrong.
+        a.close_trim = [this](bool save, int was_pan, int was_tilt) {
+            if (save) {
+                ScsServo::SaveTrim();
+            } else {
+                ScsServo::SetTrim(was_pan, was_tilt);
+                head_.Recentre();
+            }
+            head_.HoldStill(false);
+        };
+
         a.about_rows = [this]() {
             // "Which server is he really using" is the question this answers,
             // so it asks the same helper the NO LLM badge does.
@@ -1702,6 +1733,125 @@ public:
             ok ? Lang::Sounds::OGG_SUCCESS : Lang::Sounds::OGG_EXCLAMATION);
     }
 
+    // 🧪 THE BOOT-TIME I2C STALL, WATCHED RATHER THAN SURVIVED.
+    //
+    //    About ten seconds into every boot, as Wi-Fi associates and the
+    //    wake-word engine starts, the shared bus stops answering for a few
+    //    hundred milliseconds. Two separate faults came out of that one window
+    //    - a silent amplifier and a servo rail that reported failure - and both
+    //    are handled now. Nothing explains WHY.
+    //
+    // 🔑 THE QUESTION THIS ANSWERS IS "ALL OF THEM, OR SOME OF THEM?"
+    //
+    //    Four devices are probed together, every 50ms, for the first 45
+    //    seconds. If the PMIC, the amplifier, the microphone codec and the IO
+    //    expander all stop answering in the same window, the fault is the BUS -
+    //    supply, pull-ups, a held line. If only the audio pair goes, the fault
+    //    is the amp reset on the AW9523 or the codecs themselves, and the bus
+    //    is innocent. Those are different repairs, and until now nobody could
+    //    say which one this is.
+    //
+    // ⚠️ THE MEASUREMENT IS ALSO TRAFFIC. Probing adds transactions to the bus
+    //    being measured, which is why it is 50ms rather than as fast as it will
+    //    go: the stall lasts hundreds of milliseconds, so 20Hz resolves it
+    //    without the instrument becoming a second cause.
+    //
+    //    Logs EDGES only, plus one summary line. A healthy boot prints one line
+    //    saying nothing happened, which is the line worth having - a boot that
+    //    prints nothing at all is indistinguishable from an instrument that did
+    //    not run.
+    void I2cWatch() {
+        struct Watched { uint8_t addr; const char* name; };
+        static constexpr Watched kWatched[] = {
+            {0x34, "pmic"}, {0x36, "amp"}, {0x40, "mic"}, {0x6F, "py32"},
+        };
+        constexpr int kStepMs = 50;
+        constexpr int kWindowMs = 45000;
+
+        constexpr uint8_t all = (1 << (sizeof(kWatched) / sizeof(kWatched[0]))) - 1;
+        uint8_t last_mask = all;        // "everything answered", the expected state
+        int64_t outage_started_us = 0;
+        int outages = 0;
+        int worst_ms = 0;
+
+        for (int waited = 0; waited < kWindowMs; waited += kStepMs) {
+            uint8_t mask = 0;
+            esp_err_t why[sizeof(kWatched) / sizeof(kWatched[0])] = {};
+            bool patient[sizeof(kWatched) / sizeof(kWatched[0])] = {};
+            for (size_t i = 0; i < sizeof(kWatched) / sizeof(kWatched[0]); i++) {
+                // 20ms, not the usual 50: a probe that waits is a probe that
+                // holds the bus, and this one runs four times per round.
+                why[i] = i2c_master_probe(i2c_bus_, kWatched[i].addr, 20);
+                if (why[i] == ESP_OK) {
+                    mask |= (1 << i);
+                    continue;
+                }
+                // 🔑 AND THE SAME QUESTION AGAIN, PATIENTLY.
+                //
+                //    A device that answers at 250ms after failing at 20ms was
+                //    never absent - the bus was BUSY, and the short timeout was
+                //    the whole fault. That is a queue, not an electrical
+                //    problem, and it means every short-timeout I2C call on this
+                //    board is reporting "device gone" for "device busy".
+                //
+                //    Only on failure, so a healthy round still costs four quick
+                //    probes and the instrument stays cheap.
+                //
+                // ⚠️ AND ONLY ON THE FIRST FAILING ROUND OF AN OUTAGE, because
+                //    the retry takes up to 250ms per device and the outage's
+                //    duration is measured in rounds. Retrying every round made
+                //    the instrument's own waiting the main term in the number
+                //    it was reporting - the first run printed "back after
+                //    50ms" for a window it had spent 750ms inside.
+                if (last_mask == all) {
+                    patient[i] = i2c_master_probe(i2c_bus_, kWatched[i].addr, 250) == ESP_OK;
+                }
+            }
+            if (waited == 0) last_mask = mask;
+
+            if (mask != last_mask) {
+                // 🔑 THE ERROR CODE IS THE WHOLE ANSWER, and the first version
+                //    of this threw it away.
+                //
+                //    ESP_ERR_NOT_FOUND is a NAK: the bus worked, the device
+                //    did not answer. ESP_ERR_TIMEOUT is the opposite - the
+                //    transaction never got out, because something else was
+                //    holding the bus. The driver serialises access per bus, so
+                //    a long burst of codec register writes produces timeouts
+                //    that look EXACTLY like an electrical fault if you only
+                //    record pass/fail. Those are different repairs.
+                std::string missing;
+                for (size_t i = 0; i < sizeof(kWatched) / sizeof(kWatched[0]); i++) {
+                    if (!(mask & (1 << i))) {
+                        missing += kWatched[i].name;
+                        missing += "=";
+                        missing += esp_err_to_name(why[i]);
+                        missing += patient[i] ? "(answered at 250ms) " : "(gone at 250ms too) ";
+                    }
+                }
+                if (mask == all) {
+                    const int ms = (int)((esp_timer_get_time() - outage_started_us) / 1000);
+                    if (ms > worst_ms) worst_ms = ms;
+                    ESP_LOGW(TAG, "i2c watch: back after %dms", ms);
+                } else {
+                    if (last_mask == all) {
+                        outage_started_us = esp_timer_get_time();
+                        outages++;
+                    }
+                    ESP_LOGW(TAG, "i2c watch: no answer from %s", missing.c_str());
+                }
+                last_mask = mask;
+            }
+            vTaskDelay(pdMS_TO_TICKS(kStepMs));
+        }
+
+        if (outages == 0) {
+            ESP_LOGI(TAG, "i2c watch: 45s, no device missed a beat");
+        } else {
+            ESP_LOGW(TAG, "i2c watch: %d outage(s) in 45s, worst %dms", outages, worst_ms);
+        }
+    }
+
     // 🧪 ONE REPORT, MEANT TO BE COMPARED WITH SOMEBODY ELSE'S.
     //
     //    Everything this firmware assumes about the hardware, read back from the
@@ -1853,6 +2003,15 @@ public:
         // has never been provisioned still has to be listening. It reads the USB
         // serial peripheral directly and touches no console setting - see
         // mcp_status_source.cc for why that distinction cost a wedged port.
+        // 🧪 The boot-time bus stall, watched. Started here because the window
+        //    it exists to capture opens about ten seconds from now; priority 1
+        //    so it yields to everything, since a measurement that competes for
+        //    CPU with the thing it is measuring is not a measurement.
+        xTaskCreate([](void* arg) {
+            static_cast<M5StackStackChanBoard*>(arg)->I2cWatch();
+            vTaskDelete(nullptr);
+        }, "i2c_watch", 3072, this, 1, nullptr);
+
         McpStatusSource::ProvisionFromSerial();
         // 🧪 A report somebody with a different unit can send back. On its own
         //    task: it probes 112 I2C addresses and reads the servos, which is

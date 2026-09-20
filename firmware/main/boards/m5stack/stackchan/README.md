@@ -51,10 +51,35 @@ Deliberately **absent**:
 
 ### 🔴 Never `ESP_ERROR_CHECK` an I²C call
 
-The shared bus NACKs under load, and it carries the PMIC, IO expander, amp, mic
+The shared bus fails under load, and it carries the PMIC, IO expander, amp, mic
 codec, PY32, touch controller and the camera's SCCB. An abort on one flaky read
 has rebooted the robot from the battery gauge and from the codec's volume write.
 **Retry, log, carry on.** `boards/common/i2c_device.cc` is patched the same way.
+
+### 🔴 A timeout on this bus means BUSY, not ABSENT — so never use a short one
+
+Measured, three times on three boots, by probing four devices every 50ms for the
+first 45 seconds (`I2cWatch`, and the summary line is on every boot):
+
+```
+W i2c watch: no answer from pmic=ESP_ERR_TIMEOUT(answered at 250ms)
+W i2c watch: back after 47ms
+W i2c watch: 3 outage(s) in 45s, worst 52ms
+```
+
+Three ~50ms windows per boot, at the Wi-Fi auth/assoc transitions, and **the
+same device answers instantly on a 250ms retry every time**. `ESP_ERR_TIMEOUT`
+means the transaction never got out; `ESP_ERR_NOT_FOUND` would mean the device
+declined. **Not one `NOT_FOUND` has ever been recorded on this board.**
+
+This is the mechanism behind both of the faults the board file defends against:
+the amplifier whose register writes "went nowhere" and the rail status register
+that read as `0xFF` were **short timeouts reported as missing hardware**. A
+pass/fail check cannot tell those apart — only the error code can, which is why
+`I2cWatch` logs it.
+
+So: give anything on this bus a generous timeout and a retry, and when a device
+appears to vanish, ask how long you waited before you ask what is wrong with it.
 
 ### 🔴 No LVGL, `std::string` or `std::vector` work on the `esp_timer` task
 

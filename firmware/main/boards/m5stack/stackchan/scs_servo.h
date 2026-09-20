@@ -118,6 +118,32 @@ public:
     // centre is in use - which means the travel limits are a guess too.
     static bool calibration_is_fallback();
 
+    // 📐 THE BENCH TRIM, AT RUNTIME.
+    //
+    //    It began as a build setting because it is per-unit - and that made it
+    //    the one number every owner had to set for their own robot by editing a
+    //    Kconfig and rebuilding the firmware. A toolchain, for a number you
+    //    arrive at by looking at the robot and deciding he is not quite straight.
+    //
+    //    So it lives in NVS now, with the build setting as the DEFAULT rather
+    //    than the value. A robot that has never been trimmed behaves exactly as
+    //    before, and nothing in the build has to change to trim one.
+    static int PanTrim();
+    static int TiltTrim();
+    // Live, not persisted: what each nudge on the trim screen calls. The head is
+    // re-centred after it so the change can be SEEN.
+    //
+    // 🔴 Clamped to kMaxTrimCounts. A bench correction is small by definition,
+    //    and the travel limits are spans around the FACTORY zero rather than
+    //    around the trimmed centre - so a trim big enough to re-aim the head
+    //    would quietly eat one side of the tilt limit, which is the limit that
+    //    exists because tilt reaches a mechanical stop.
+    static void SetTrim(int pan_counts, int tilt_counts);
+    // Writes the current pair to NVS. Leaving the screen with Back instead calls
+    // SetTrim with whatever it opened with, so nothing persists by accident.
+    static void SaveTrim();
+    static constexpr int kMaxTrimCounts = 40;   // ~12 degrees either way
+
 private:
     bool initialized_ = false;
 

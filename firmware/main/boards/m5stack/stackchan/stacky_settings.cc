@@ -22,6 +22,21 @@ struct RowCtx {
     StackySettings* self;
 };
 
+// 📐 One trim button's worth of intent. LVGL hands a callback exactly one
+//    user-data pointer, and the trim buttons need two facts each - who to call
+//    and which way - so each button points at one of these instead.
+struct Nudge {
+    StackySettings* self = nullptr;
+    int d_pan = 0;
+    int d_tilt = 0;
+    bool save = false;   // only meaningful for the two leave buttons
+};
+
+// Counts per tap. One count is about a third of a degree, which is finer than
+// anybody can see and would make crossing the range forty taps; two is a
+// visible step and twenty taps end to end.
+constexpr int kTrimStep = 2;
+
 }  // namespace
 
 void StackySettings::Build(const Actions& actions) {
@@ -65,6 +80,8 @@ void StackySettings::Build(const Actions& actions) {
     BuildList();
     BuildAbout();
     lv_obj_add_flag(about_, LV_OBJ_FLAG_HIDDEN);
+    BuildTrim();
+    lv_obj_add_flag(trim_, LV_OBJ_FLAG_HIDDEN);
 
     ESP_LOGI(TAG, "settings menu built (hidden)");
 }
@@ -299,6 +316,23 @@ void StackySettings::BuildList() {
         if (self->actions_.motion_check) self->actions_.motion_check();
     });
 
+    // 📐 Below Motion check, because they are the same question asked twice:
+    //    one shows you how he moves, the other fixes where "straight" is.
+    AddRow("Head trim", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        if (self->actions_.get_trim) {
+            const auto now = self->actions_.get_trim();
+            self->trim_was_pan_ = now.first;
+            self->trim_was_tilt_ = now.second;
+        }
+        self->ShowTrim();
+        lv_obj_add_flag(self->list_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(self->trim_, LV_OBJ_FLAG_HIDDEN);
+        // Centre him as the page opens, so the first thing you see is the pose
+        // you are about to judge rather than wherever he happened to be looking.
+        if (self->actions_.nudge_trim) self->actions_.nudge_trim(0, 0);
+    });
+
     AddRow("About", [](lv_event_t* e) {
         auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
         self->FillAbout();
@@ -310,6 +344,130 @@ void StackySettings::BuildList() {
         auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
         self->Hide();
     });
+}
+
+// 📐 THE TRIM PAGE.
+//
+//    Two rows of [-] value [+], and Save / Back. Deliberately NOT a slider: the
+//    whole range is ±40 counts, so a slider spanning the screen moves several
+//    counts per pixel of finger - and the adjustment is "one more, one more,
+//    stop", not a value you aim at.
+//
+//    The head moves on every tap, which is the whole point. You are not reading
+//    a number, you are looking at a robot and deciding whether he is straight;
+//    the number is there so you can write it down.
+void StackySettings::BuildTrim() {
+    trim_ = lv_obj_create(root_);
+    lv_obj_remove_style_all(trim_);
+    lv_obj_set_size(trim_, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_pad_all(trim_, kPad, 0);
+    lv_obj_set_style_pad_row(trim_, kPad, 0);
+    lv_obj_set_flex_flow(trim_, LV_FLEX_FLOW_COLUMN);
+    // Opaque, for the reason spelled out in BuildAbout.
+    lv_obj_set_style_bg_color(trim_, c_bg_, 0);
+    lv_obj_set_style_bg_opa(trim_, LV_OPA_COVER, 0);
+
+    lv_obj_t* hint = lv_label_create(trim_);
+    lv_label_set_text(hint, "Nudge until he looks straight at you.");
+    lv_obj_set_style_text_color(hint, c_dim_, 0);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(hint, LV_PCT(100));
+
+    for (int axis = 0; axis < 2; axis++) {
+        lv_obj_t* row = lv_obj_create(trim_);
+        lv_obj_remove_style_all(row);
+        lv_obj_set_size(row, LV_PCT(100), kRowHeight);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+
+        for (int half = 0; half < 2; half++) {
+            if (half == 1) {
+                // The label sits between the two buttons, and carries both the
+                // axis name and the value: "PAN  +6". One label is enough, and
+                // two would have to agree about alignment.
+                lv_obj_t* value = lv_label_create(row);
+                lv_obj_set_style_text_color(value, c_text_, 0);
+                lv_obj_set_flex_grow(value, 1);
+                lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_CENTER, 0);
+                if (axis == 0) trim_pan_value_ = value; else trim_tilt_value_ = value;
+            }
+            lv_obj_t* b = lv_button_create(row);
+            // See AddRow: the default button style is a blue gradient, and
+            // colouring over it leaves the gradient in place.
+            lv_obj_remove_style_all(b);
+            lv_obj_set_size(b, 56, kRowHeight);
+            lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+            lv_obj_set_style_bg_color(b, c_panel_, 0);
+            lv_obj_set_style_bg_color(b, c_accent_, LV_STATE_PRESSED);
+            lv_obj_set_style_radius(b, 6, 0);
+            lv_obj_t* l = lv_label_create(b);
+            lv_label_set_text(l, half == 0 ? "-" : "+");
+            lv_obj_set_style_text_color(l, c_text_, 0);
+            lv_obj_center(l);
+            // 🔴 The button has to carry WHICH nudge it is, and LVGL gives a
+            //    callback one user-data pointer, which is already `self`. So
+            //    the four deltas live here, in static storage, and each button
+            //    points at its own. Packing them into the pointer itself was
+            //    the first version and it is unreadable a week later.
+            static Nudge nudges[4];
+            Nudge& n = nudges[axis * 2 + half];
+            n.self = this;
+            const int step = half == 0 ? -kTrimStep : kTrimStep;
+            n.d_pan = axis == 0 ? step : 0;
+            n.d_tilt = axis == 1 ? step : 0;
+            lv_obj_add_event_cb(b, [](lv_event_t* e) {
+                auto* n = static_cast<Nudge*>(lv_event_get_user_data(e));
+                if (n->self->actions_.nudge_trim) {
+                    n->self->actions_.nudge_trim(n->d_pan, n->d_tilt);
+                }
+                n->self->ShowTrim();
+            }, LV_EVENT_CLICKED, &n);
+        }
+    }
+
+    lv_obj_t* buttons = lv_obj_create(trim_);
+    lv_obj_remove_style_all(buttons);
+    lv_obj_set_size(buttons, LV_PCT(100), kRowHeight);
+    lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(buttons, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    auto leave = [this, buttons](const char* text, bool save) {
+        lv_obj_t* b = lv_button_create(buttons);
+        lv_obj_remove_style_all(b);
+        lv_obj_set_size(b, LV_PCT(48), kRowHeight);
+        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(b, save ? c_accent_ : c_panel_, 0);
+        lv_obj_set_style_bg_color(b, c_accent_, LV_STATE_PRESSED);
+        lv_obj_set_style_radius(b, 6, 0);
+        lv_obj_t* l = lv_label_create(b);
+        lv_label_set_text(l, text);
+        lv_obj_set_style_text_color(l, c_text_, 0);
+        lv_obj_center(l);
+        static Nudge leaves[2];
+        Nudge& n = leaves[save ? 1 : 0];
+        n.self = this;
+        n.save = save;
+        lv_obj_add_event_cb(b, [](lv_event_t* e) {
+            auto* n = static_cast<Nudge*>(lv_event_get_user_data(e));
+            StackySettings* self = n->self;
+            if (self->actions_.close_trim) {
+                self->actions_.close_trim(n->save, self->trim_was_pan_, self->trim_was_tilt_);
+            }
+            lv_obj_add_flag(self->trim_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(self->list_, LV_OBJ_FLAG_HIDDEN);
+        }, LV_EVENT_CLICKED, &n);
+    };
+    leave("Back", false);
+    leave("Save", true);
+}
+
+void StackySettings::ShowTrim() {
+    if (trim_pan_value_ == nullptr || !actions_.get_trim) return;
+    const auto now = actions_.get_trim();
+    lv_label_set_text_fmt(trim_pan_value_, "PAN  %+d", now.first);
+    lv_label_set_text_fmt(trim_tilt_value_, "TILT  %+d", now.second);
 }
 
 void StackySettings::BuildAbout() {

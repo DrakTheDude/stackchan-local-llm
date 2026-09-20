@@ -193,6 +193,17 @@ int StackChanHead::MotionStep() {
     //    glance and not a status alert. last_state_ is invalidated so the resting
     //    pose is re-commanded when the hold lifts, rather than assumed to have
     //    survived it.
+    // 📐 ABOVE the hold, deliberately. The trim screen holds the head still -
+    //    it must not glance away while you are judging whether he is straight -
+    //    and then asks for exactly one move. A recentre gated behind the hold
+    //    would make every nudge on that screen look like nothing happened.
+    if (recentre_) {
+        recentre_ = false;
+        last_state_ = -1;
+        Center();
+        return 260;   // long enough for the move to land before anything else
+    }
+
     if (hold_still_) {
         last_state_ = -1;
         return kPollMs;
