@@ -170,6 +170,16 @@ public:
 private:
     enum class Mode { kIdle, kListening, kThinking, kSpeaking };
 
+    // 🧪 Every change of mode, logged with who asked for it.
+    //
+    //    The mouth only animates in kSpeaking, and kThinking pins it shut - so
+    //    "the mouth stopped moving" and "the mode is wrong" are the same report,
+    //    and neither was visible in any log. The mode is set from two places
+    //    that interleave (a status change and a chat message, from different
+    //    tasks), which is exactly the kind of ordering nobody reconstructs by
+    //    reading the code afterwards. It was tried.
+    void SetMode(Mode m, const char* why);
+
     struct Eye {
         lv_obj_t* sclera = nullptr;
         lv_obj_t* pupil = nullptr;

@@ -59,11 +59,21 @@ English-first board support, with every hardware assumption written down next to
 - ✅ **Privacy switches.** The microphone switch closes the input device, so the wake word stops too; the
   camera switch refuses at the point of capture. Both persist across a reboot and the mute shows on
   screen, because a mute you cannot see is one you will forget.
-- ⬜ **The mouth stops moving after a photo is shown.** Reported 2026-09-19. The face animates again
-  for everything else, so the speaking mouth specifically stops tracking. First suspect is the guard
-  in `StackyFace::Tick()` that skips animating while the face is behind an opaque overlay — the
-  screensaver uses it, and the photo preview may leave it set. Worth checking `saver_ticks_` and the
-  preview's teardown path before anything else.
+- 🟡 **The mouth stops moving after a photo is shown.** Reported 2026-09-19. The face animates again
+  for everything else, so the speaking mouth specifically stops tracking.
+
+  **Three suspects ruled out by inspection, including the one this item used to name:**
+  the screensaver guard in `Tick()` cannot fire — it needs `status_ != nullptr` and this build
+  attaches no status source; the mouth is not being *covered*, since it sits at screen y≈161 and the
+  chat bar is capped at 40px against the bottom; and the preview teardown does un-hide `emoji_box_`
+  on every path.
+
+  What is left is `mode_`. The mouth only animates in `kSpeaking`, and `kThinking` pins it shut while
+  the eyes carry on blinking — which is precisely what the report describes. But `mode_` is set from
+  two places, on two different tasks, that interleave around a tool call, and **no log records any of
+  it**. So the next step is an instrument rather than a guess: every mode change now logs its old
+  state, new state and who asked, and both edges of the preview log the task they arrive on. One
+  repro with a serial capture should name the path.
 - ⬜ **Diagnose the boot-time I²C glitch, rather than only surviving it.** About ten seconds into every
   boot, as Wi-Fi associates and the wake-word engine starts, the shared bus NAKs for a few hundred
   milliseconds. Both chips on it go unreachable, and two separate faults came out of that one window: a
@@ -118,8 +128,9 @@ English-first board support, with every hardware assumption written down next to
 - 🟡 **Finish moving settings onto the robot.** The on-screen menu exists and took the ones that matter
   most — Wi-Fi & server, volume, brightness, the self-check, About, and the privacy switches. What is
   still scattered: the **pan/tilt trim** is a rebuild, and it is the one number every owner has to set for
-  their own robot; the ambient **status source** URL and token have no home at all; screen and standby
-  timeouts are compiled in.
+  their own robot; the ambient **status source** URL and token are typed in over USB serial — a home, but
+  not an on-screen one, and the deliberate reason is that the token should not be somewhere a guest can
+  read it off the robot's own face; screen and standby timeouts are compiled in.
   The trim is the awkward one — it wants a live preview ("move until he looks straight"), which is a
   different kind of screen from a list of switches.
   ⚠️ A page served on the LAN would be easier to type into, and is a listening socket on a device whose

@@ -7,6 +7,8 @@
 
 #include <esp_log.h>
 #include <esp_random.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -719,6 +721,14 @@ void StackyFace::ApplyNoServerBadge() {
 // order, and a caption over a photo is what we want anyway.
 void StackyFace::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     const bool showing = image != nullptr;
+    // 🧪 Both edges, with the task name on them. The photo window is when the
+    //    face is reported to stop animating, and the teardown arrives from the
+    //    esp_timer task rather than from whoever asked for the photo - so the
+    //    two edges are not even on the same thread. Without this line the
+    //    window has to be inferred from the camera's own logging, which stops
+    //    several steps earlier.
+    ESP_LOGI(TAG, "preview %s (from %s)", showing ? "shown" : "cleared",
+             pcTaskGetName(nullptr));
     SpiLcdDisplay::SetPreviewImage(std::move(image));
     if (!showing || preview_image_ == nullptr) {
         return;
@@ -1095,18 +1105,18 @@ void StackyFace::SetStatus(const char* status) {
             //    attentively waiting - exactly the wrong thing to show while he
             //    is busy.
             if (!thinking_) {
-                mode_ = Mode::kListening;
+                SetMode(Mode::kListening, "status:listening");
             }
         } else if (strcmp(status, Lang::Strings::SPEAKING) == 0) {
             cleared = thinking_;
             SetThinkingInternal(false);
-            mode_ = Mode::kSpeaking;
+            SetMode(Mode::kSpeaking, "status:speaking");
         } else if (strcmp(status, Lang::Strings::CONNECTING) == 0) {
-            mode_ = Mode::kThinking;
+            SetMode(Mode::kThinking, "status:connecting");
         } else {
             cleared = thinking_;
             SetThinkingInternal(false);
-            mode_ = Mode::kIdle;
+            SetMode(Mode::kIdle, "status:other");
         }
     }
     // Outside the lock, and NOT optional: without it the head keeps the
@@ -1118,6 +1128,20 @@ void StackyFace::SetStatus(const char* status) {
     }
 }
 
+// 🧪 See the declaration. Logged on every CHANGE, not every call - the status
+//    refreshes far too often for a line per call to be readable, and a mode
+//    that was re-set to what it already was is not the event anybody is looking
+//    for.
+void StackyFace::SetMode(Mode m, const char* why) {
+    if (mode_ == m) {
+        return;
+    }
+    static const char* kNames[] = {"idle", "listening", "thinking", "speaking"};
+    ESP_LOGI(TAG, "mode %s -> %s (%s)", kNames[static_cast<int>(mode_)],
+             kNames[static_cast<int>(m)], why);
+    mode_ = m;
+}
+
 // Caller holds the display lock. The callback is invoked OUTSIDE it by the
 // caller's own scoping - see SetChatMessage - because it reaches the head.
 void StackyFace::SetThinkingInternal(bool on) {
@@ -1126,8 +1150,20 @@ void StackyFace::SetThinkingInternal(bool on) {
     }
     thinking_ = on;
     if (on) {
-        mode_ = Mode::kThinking;
+        SetMode(Mode::kThinking, "thinking:on");
     }
+    // ⚠️ AND NOTHING ON THE WAY BACK DOWN, deliberately - but read this before
+    //    "fixing" it. Clearing thinking leaves the mode at kThinking, so the
+    //    mouth stays shut until something else sets it. Every caller that turns
+    //    thinking off does set it, immediately: SetStatus assigns a mode on the
+    //    next line, and SetChatMessage("assistant") is followed by the device
+    //    entering the speaking state. Setting kIdle here would therefore be a
+    //    visible flicker to idle in between, on every single reply.
+    //
+    //    It is written down because it is the standing suspect for "the mouth
+    //    stopped moving": if any path ever clears thinking WITHOUT a status
+    //    change behind it, the face freezes in the thinking pose while the eyes
+    //    carry on blinking - which is exactly what that report looks like.
 }
 
 void StackyFace::SetChatMessage(const char* role, const char* content) {
