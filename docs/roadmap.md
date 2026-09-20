@@ -128,17 +128,29 @@ English-first board support, with every hardware assumption written down next to
   The Wi-Fi portal is NOT the place for any of it: its HTML lives in a managed component, so every field
   added there is a fork to maintain. It stays for what it is good at — the things you need *before* the
   robot is on the network.
-- ⬜ 🎭 **[Characters — a skin for the whole robot](characters.md).** Not a colour scheme: look, motion,
-  light, voice and persona swapped *together*, so a character is a different robot to be in a room with
-  rather than a repaint. Design note written; nothing built. The prerequisite is tokenising the look and
-  motion constants currently spread across `stacky_face.cc`, `stackchan_head.cc`, `stackchan_leds.cc` and
-  `InitializeTheme()` — and the hard part is that a character **spans two machines**, since look and motion
-  live on the robot while voice and persona live in server config.
+- ✅ 🎭 **[Bodies and moods](characters.md).** Two bodies (Drax, Classic) and three moods, switchable
+  from the settings menu with no reflash and no reboot. A body carries the face palette, the UI theme,
+  the eye geometry, the LED ring, the voice and the persona; a mood carries `motion_unit` and
+  `gesture_unit`.
 
-## 2. Local AI stack 🟡
+  🔴 **They are two axes, and that was a correction rather than a design.** The first version had one
+  list, which made "caffeinated Classic" a contradiction when it is obviously a thing somebody would
+  want to be — *caffeinated Stacky is still Stacky, he just moves and talks fast*. A mood modulates a
+  robot; a body replaces him.
 
-Wake word → STT → model → TTS, with every backend a setting rather than a choice made for you.
+  🔑 **Everything is a unit, not a list of values.** One number scales every duration, every
+  amplitude, the whole face, and every corner. "Five in the morning" is not a new animation — it is
+  the existing glance behaviour at `motion_unit 2.2`. `radius_unit 0` is the whole of the Classic
+  identity: square everything with one number.
 
+  **The two machines meet at the ID and nowhere else.** The firmware sends which body it is wearing in
+  the *handshake headers* — not the hello message, because components are built from config the moment
+  a connection is accepted, while hello is still in flight. The server never learns about brow
+  thickness; the firmware never learns what a prompt is.
+
+  ⚠️ Still open: the face LAYOUT does not scale with the shape (positions are compile-time), and
+  `Repaint()` has to know about every property a body can touch — nothing enforces that, so the next
+  token added will apply at construction and silently not on switch.
 - ✅ **`docker compose` stack with each stage replaceable**: VAD, STT, LLM, TTS. One file, one
   `.env`, and a single value that must change — this machine's LAN address.
 - 🟡 **LLM: any OpenAI-compatible endpoint with tool calling.** Ollama is the default and llama.cpp
