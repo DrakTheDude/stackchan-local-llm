@@ -208,13 +208,17 @@ Wake word → STT → model → TTS, with every backend a setting rather than a 
 mounts any MCP server as tools for the model, Home Assistant ships an official MCP server, and the reference
 project proved the path end to end.
 
-- ⬜ **Tools for the model:** how to add an MCP server (stdio / SSE / streamable HTTP), with worked
-  examples — Home Assistant, a notes or files server, a custom one
+- ✅ **Tools for the model** — [mcp.md](mcp.md): the one JSON file, all three transports, where
+  credentials go, how to tell whether it worked, and what makes a model actually *choose* a tool.
+  Including the trap that `transport` defaults to `sse`, so pointing at a streamable-HTTP server
+  without saying so connects and then silently offers no tools.
 - ⬜ **Ambient status contract:** the small tool shape the robot polls to drive its ring, idle screen and
   spoken alerts — e.g. a level (`ok` / `warn` / `alert`), a one-line summary, optional cards. Off by default.
 - ⬜ **Reference status server** — a few dozen lines, so the ring and idle screen can be tried with no
   homelab. The reference project's homelab integration becomes one example, not a requirement.
-- ⬜ **The robot's own tools**, documented as an API: head, LED ring, camera, test hooks
+- ✅ **The robot's own tools** — [robot-tools.md](robot-tools.md): all fourteen, what each takes,
+  and the four upstream ships that this firmware removes rather than hides. Plus the three things
+  tuning them taught, which are the useful part for anybody writing their own.
 - ✅ 🔴 **Safety guidance.** [docs/tool-safety.md](tool-safety.md). Voice has no confirmation step, and speech recognition mishears. Recommend
   read-only tools by default and an explicit allowlist for anything that changes the world — a misheard
   sentence must not be able to unlock a door.
