@@ -117,9 +117,16 @@ afterwards, so it is idle the rest of the time — that is a privacy property an
 also a correctness one: running it continuously loads the same bus the wake-word
 engine uses, and detection went spotty the moment it was tried.
 
-The photo goes on his own screen, full width. With a vision model configured it
-is also described — [vision.md](vision.md) — and with none, it just stays on the
-screen, which is what it did before.
+The photo goes on his own screen, full width, and stays for **twenty seconds**.
+With a vision model configured it is also described — [vision.md](vision.md) —
+and with none, it just stays on the screen, which is what it did before.
+
+⚠️ **While the photo is up, his face is not** — it is the same screen, and
+twenty seconds is usually longer than the pause before he starts talking about
+the picture. So he often delivers most of that reply with a photograph where his
+face should be, and the face returns mid-sentence. That reads as "his mouth
+stopped moving", and it was reported as exactly that. It is the cost of a longer
+look at the photo, and the photo won.
 
 The camera switch in the settings menu refuses at the point of capture, and the
 tool then says so in a sentence rather than failing.

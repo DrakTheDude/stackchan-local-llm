@@ -59,21 +59,29 @@ English-first board support, with every hardware assumption written down next to
 - ✅ **Privacy switches.** The microphone switch closes the input device, so the wake word stops too; the
   camera switch refuses at the point of capture. Both persist across a reboot and the mute shows on
   screen, because a mute you cannot see is one you will forget.
-- 🟡 **The mouth stops moving after a photo is shown.** Reported 2026-09-19. The face animates again
-  for everything else, so the speaking mouth specifically stops tracking.
+- ✅ **"The mouth stops moving after a photo" — it never did.** Reported and closed 2026-09-19. The
+  face is *hidden behind the photo*, and the photo now stays up for twenty seconds, so most of the
+  reply is delivered with no face on screen at all. The mouth resumes the instant the photo goes away,
+  which is what the capture shows and what watching it confirms:
 
-  **Three suspects ruled out by inspection, including the one this item used to name:**
-  the screensaver guard in `Tick()` cannot fire — it needs `status_ != nullptr` and this build
-  attaches no status source; the mouth is not being *covered*, since it sits at screen y≈161 and the
-  chat bar is capped at 40px against the bottom; and the preview teardown does un-hide `emoji_box_`
-  on every path.
+  ```
+  I (89844) preview shown (from main)
+  I (100434) mode thinking -> speaking          <- 10.6s into the photo
+  I (109844) preview cleared (from esp_timer)   <- face back, mouth moving
+  I (122904) mode speaking -> listening
+  ```
 
-  What is left is `mode_`. The mouth only animates in `kSpeaking`, and `kThinking` pins it shut while
-  the eyes carry on blinking — which is precisely what the report describes. But `mode_` is set from
-  two places, on two different tasks, that interleave around a tool call, and **no log records any of
-  it**. So the next step is an instrument rather than a guess: every mode change now logs its old
-  state, new state and who asked, and both edges of the preview log the task they arrive on. One
-  repro with a serial capture should name the path.
+  🔴 **And it was self-inflicted.** `PREVIEW_IMAGE_DURATION_MS` went 5s → 20s in `07c2bdf`, because
+  five seconds was too short to look at a photo. Nobody connected "the photo stays longer" with "the
+  face is gone for longer", because the two are the same screen and only one of them was being thought
+  about. The trade is real and the current setting is the deliberate one: **you cannot show a
+  photograph and a face at the same time on a 2" screen.**
+
+  Three suspects were ruled out by inspection first, including the one this item originally named —
+  the `Tick()` screensaver guard cannot fire without a status source attached; the mouth is not
+  covered by the chat bar; the preview teardown does un-hide the face on every path. The instrument
+  that settled it stays: every mode change logs old → new and who asked, and both preview edges log
+  their task. They are not the same task, which is worth knowing on its own.
 - ⬜ **Diagnose the boot-time I²C glitch, rather than only surviving it.** About ten seconds into every
   boot, as Wi-Fi associates and the wake-word engine starts, the shared bus NAKs for a few hundred
   milliseconds. Both chips on it go unreachable, and two separate faults came out of that one window: a
