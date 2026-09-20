@@ -151,6 +151,13 @@ English-first board support, with every hardware assumption written down next to
   ⚠️ Still open: the face LAYOUT does not scale with the shape (positions are compile-time), and
   `Repaint()` has to know about every property a body can touch — nothing enforces that, so the next
   token added will apply at construction and silently not on switch.
+
+---
+
+## 2. Local AI stack 🟡
+
+Wake word → STT → model → TTS, with every backend a setting rather than a choice made for you.
+
 - ✅ **`docker compose` stack with each stage replaceable**: VAD, STT, LLM, TTS. One file, one
   `.env`, and a single value that must change — this machine's LAN address.
 - 🟡 **LLM: any OpenAI-compatible endpoint with tool calling.** Ollama is the default and llama.cpp
@@ -223,7 +230,7 @@ project proved the path end to end.
   `self.reboot`. 18 tool names in the binary became 14, and `claims.ini` asserts the four stay out —
   a subtree update would restore them and nothing else would notice.
 
-## 4. Reproducibility 🟡
+## 4. Reproducibility ✅
 
 Full English docs, and a path from a factory device to a local robot in about 30 minutes.
 
@@ -244,11 +251,9 @@ Full English docs, and a path from a factory device to a local robot in about 30
   over NVS and destroys the per-unit servo calibration.
 - ✅ Building from source — [quickstart §2](quickstart.md), with the `deploy/build.sh` requirement
   and why a plain `idf.py build` silently produces a different board
-- ⬜ Hardware bring-up guide
 - ✅ Troubleshooting: symptom → cause → fix — the table at the end of
   [quickstart.md](quickstart.md#troubleshooting), plus the flasher page's own. Worth splitting into
   its own page when it outgrows a table rather than before
-- ⬜ Known board variants, maintained from reports
 - ✅ **Automated firmware builds and versioned releases** (app + assets), with the release blocked
   unless the artefact is right: chip and board first, then the OTA URL, then the assets partition
   inspected for the wake-word model and the face. Three releases shipped for the wrong chip before
@@ -265,28 +270,54 @@ The reason the project exists, so it gets a page of its own rather than a promis
   printed in a log message. No NTP server either, so the clock comes from your own server.
 - ⬜ What the factory firmware sends, and where, as far as can be established
 
-## Upstream ⬜
-
-- ⬜ `xiaozhi-esp32-server`: the TTS sentence splitter missing the ASCII full stop; `.rstrip()` eating the
-  spaces between streamed chunks. Both have measured reproductions.
-- ⬜ `xiaozhi-esp32`: the StackChan board; a runtime-configurable server address
-- ⬜ `xiaozhi-esp32`: 14 language packs start `ACCESS_VIA_BROWSER` with a Chinese full-width comma
-  (fixed here already)
-- ⬜ `xiaozhi-esp32`: `I2cDevice` aborts the whole device on one flaky I²C transfer (fixed here already)
-- ⬜ `xiaozhi-esp32`: CoreS3 trusts `esp_codec_dev_open`, which returns success when the amplifier is
-  unreachable — the robot then plays every reply into a chip that is not listening, silently. Affects the
-  stock CoreS3 board, not just this one; it only looks intermittent because a boot chime sometimes
-  happens to retry the open at the right moment (fixed here already)
-- ⬜ Possibly: English logging / i18n for the server
-
-## Release 🟡
+## Release ✅
 
 - ✅ Private GitHub repo while the port was in progress
 - ✅ Public, with the quickstart run end to end on a factory unit
 - ✅ **Tagged releases with a browser flasher**, built and asserted by CI. How to cut one, and what
   each assertion is there to stop, is in [releasing.md](releasing.md)
-- ⬜ Flashed and used by somebody who did not build it. Verified on one robot, by one person
 
+
+## Waiting on a second robot
+
+**Not roadmap items, because no amount of work here finishes them.** Every hardware claim in this
+project comes from one unit, and these need a different one in somebody else's hands:
+
+- **Hardware bring-up guide** — what a first power-on looks like, and what to check when it does not.
+  Written from one robot it would be a description of this robot.
+- **Known board variants, maintained from reports** — there is nothing to maintain until a second
+  variant is reported.
+- **Flashed and used by somebody who did not build it** — the one that matters most, and the one
+  least in our control.
+
+They sit here rather than as ⬜ so the open items above stay honestly actionable. A list where some
+entries can never be closed teaches a reader to skim the ones that can.
+
+> 🔑 **This is the most useful thing a second owner could contribute**, and it costs them a report
+> rather than a pull request. See [`tools/model-bench`](../tools/model-bench) if it is a GPU rather
+> than a robot.
+
+## Upstream — ours to send, after it has run a while
+
+**Not blocked on anybody. Waiting on a condition:** a week or two of daily use before these go to
+somebody else's repository. Every one is already fixed and running here, and a patch pushed upstream
+and then changed is worse than the same patch sent a fortnight later.
+
+- `xiaozhi-esp32-server`: the TTS sentence splitter missing the ASCII full stop; `.rstrip()` eating the
+  spaces between streamed chunks. Both have measured reproductions.
+- `xiaozhi-esp32`: the StackChan board; a runtime-configurable server address
+- `xiaozhi-esp32`: 14 language packs start `ACCESS_VIA_BROWSER` with a Chinese full-width comma
+  (fixed here already)
+- `xiaozhi-esp32`: `I2cDevice` aborts the whole device on one flaky I²C transfer (fixed here already)
+- `xiaozhi-esp32`: CoreS3 trusts `esp_codec_dev_open`, which returns success when the amplifier is
+  unreachable — the robot then plays every reply into a chip that is not listening, silently. Affects the
+  stock CoreS3 board, not just this one; it only looks intermittent because a boot chime sometimes
+  happens to retry the open at the right moment (fixed here already)
+- Possibly: English logging / i18n for the server
+
+The argument for sending them at all: each is a bug that bites everybody using those projects, not
+just this robot. The `esp_codec_dev_open` one in particular affects the stock CoreS3 board and
+presents as an intermittent fault, which is the worst kind to inherit.
 ---
 
 ## Suggested order
