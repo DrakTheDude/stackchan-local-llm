@@ -67,7 +67,10 @@ public:
     //    passages this is the first thing to turn back off - hence the runtime
     //    toggle rather than a constant.
     void SetSpeakerBoost(bool enable);
-    bool speaker_boost() const { return speaker_boost_; }
+    // No getter: the MCP tool sets boost and reports it back by READING THE
+    // CHIP (ReadAmpState), not by trusting a flag we kept. There was an
+    // accessor here that nothing called, which would have been the convenient
+    // wrong answer the day the write silently failed.
 
     // Reads REG61 (boost) and REG0C (volume) back off the chip. Returns e.g.
     // "REG61=0x6673 REG0C=0x0064". The point is to tell "the write did not

@@ -20,14 +20,15 @@
 
 namespace {
 
-// Cartoon ink, inverted for a black screen. See the header for why the features
-// are monochrome: a cartoon eye is legible because of the VALUE step between a
-// bright sclera and a dark pupil, and hue cannot stand in for that.
-constexpr uint32_t kInk = 0xF2FAFF;    // sclera, brows, mouth - white, faint cyan
-constexpr uint32_t kPupil = 0x07080E;  // near-black, not pure, so it still reads
-constexpr uint32_t kGlint = 0xFFFFFF;
-// The accent colour, kept as a bloom rather than as a feature.
-constexpr uint32_t kGlow = 0xA855FF;
+// 🎨 THE FACE PALETTE USED TO LIVE HERE - kInk, kPupil, kGlint, kGlow - and it
+//    was removed rather than left unused. Every colour now comes from
+//    character::CurrentPalette(), because a body replaces the whole palette and
+//    a literal in this file would survive the switch.
+//
+//    They were dead, but that is not why they had to go: a hardcoded palette
+//    sitting in the file whose rule is "no hardcoded palette" is an invitation.
+//    The next person adding a feature reaches for the nearest constant, and it
+//    would have worked perfectly on the body it was written for.
 
 // Layout.
 //

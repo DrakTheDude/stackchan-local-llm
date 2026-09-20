@@ -22,9 +22,14 @@ OTA URL and the *contents* of the assets partition, and published with a
 calibration. And the model floor is measured: fifteen models, tool calling, speed and VRAM, in
 [model-floor.md](model-floor.md).
 
+**Every pillar is complete**, which is a statement about this list rather than about the project —
+a roadmap finishing means the things somebody thought of at the start have been done, and the useful
+work after that comes from use.
+
 **What is left is other people's hardware.** Every hardware claim comes from one robot; the model
 numbers now come from two GPUs, which was enough for them to disagree and for that to be the most
-useful thing they said.
+useful thing they said. A third card, a second robot, or somebody flashing this who did not build it
+would each be worth more than another feature.
 
 ⚠️ **All of it is verified on exactly one robot.** Every hardware claim here — the I²C map, the servo
 rail, the camera's behaviour, the audio quirks — comes from a single unit. A report from a second one is
@@ -213,16 +218,21 @@ English-first board support, with every hardware assumption written down next to
 
 ---
 
-## 2. Local AI stack 🟡
+## 2. Local AI stack ✅
 
 Wake word → STT → model → TTS, with every backend a setting rather than a choice made for you.
 
 - ✅ **`docker compose` stack with each stage replaceable**: VAD, STT, LLM, TTS. One file, one
   `.env`, and a single value that must change — this machine's LAN address.
-- 🟡 **LLM: any OpenAI-compatible endpoint with tool calling.** Ollama is the default and llama.cpp
-  is a compose profile; both are configured and documented, with LM Studio as a commented third.
-  Only llama.cpp is *verified* in daily use. The template requirement is written down because it
-  is the usual reason a model "cannot call tools" — llama.cpp needs `--jinja`.
+- ✅ **LLM: any OpenAI-compatible endpoint with tool calling.** Ollama is the default and llama.cpp
+  is a compose profile; both are configured and documented, with LM Studio as a commented third. The
+  template requirement is written down because it is the usual reason a model "cannot call tools" —
+  llama.cpp needs `--jinja`.
+
+  **Both are now verified in daily use**, which is the only test that counted. Ollama has served the
+  reference robot for three days, including the homelab tool calls, and the owner reports no
+  perceptible difference from llama.cpp. That is the useful finding: at this workload the runtime is
+  not what you feel — the model and the card are.
 - ✅ 🔑 **[An honest model floor](model-floor.md), measured.** Fifteen models on one RTX 4090:
   tool-calling score, time to the first *spoken* word, tokens/second and VRAM, with failures published.
   The guesses it replaced were wrong in the middle — `qwen3:8b` scores 100% where `qwen3:14b`, the
@@ -232,9 +242,19 @@ Wake word → STT → model → TTS, with every backend a setting rather than a 
   silence before the first word); and **speed tracks *active* parameters**, so a 30B MoE generates at a
   4B's rate. The harness needed five fixes first, each of which produced a confident wrong number —
   they are documented at the foot of the page because none of them are specific to this project.
-- ⬜ **The same numbers on a second GPU.** [`tools/model-bench/sweep.sh`](../tools/model-bench/sweep.sh)
-  is one command against any Ollama; results from a smaller card are the most useful contribution to
-  this page.
+- ✅ **The same numbers on a second GPU** — an RTX 5060 Mobile, 8 GB, swept over the network with
+  [`sweep.sh`](../tools/model-bench/sweep.sh), and then swept **again** a day later. The second run was
+  the more valuable one: with nothing changed between them, everything that moved is noise, and
+  [model-floor.md](model-floor.md) now says how much. Tokens/second holds under 1%; the tool score
+  swings ±2 cases in 21. So compare cards by tokens/second and read tool percentages as a band — the
+  page had been inviting a precision it did not have.
+
+  The card also answered the vision question that a 24 GB card cannot: at 8 GB the vision model
+  **evicts** the chat model unless the chat model is small, which makes vision a choice rather than an
+  addition. Measured in [vision.md](vision.md).
+
+  ⬜ Still the most useful contribution anybody else could make: **a third card**, and ideally a
+  non-NVIDIA one. Two points define a line and neither of these is an AMD or an Apple part.
 - ✅ **Reasoning can be switched off, without patching the server.** Its Ollama provider prepends
   `/no_think` to the user's message for any `qwen3*` model and calls the OpenAI-compatible endpoint;
   measured, neither does anything, and the instruction is visible to the model as part of what the

@@ -71,8 +71,6 @@ public:
     //    Observed, not derived - it is the same wiring that made a plain 0..11
     //    walk look like a continuous ring rather than a zig-zag.
     static constexpr int MirrorOf(int i) { return kLedCount - 1 - i; }
-    // The chip's bounds check allows 32 entries, even though only 12 exist.
-    static constexpr int kMaxPixels = 32;
     static constexpr uint8_t kIoeAddr = 0x6F;
 
     ~StackChanLeds();
@@ -101,7 +99,6 @@ public:
     // 0..100. Kept low on purpose: WS2812s at full duty are unpleasant at desk
     // distance.
     void SetMasterBrightness(int percent);
-    int GetMasterBrightness() const { return percent_; }
 
     void Solid(RgbColor c);
     void Off();

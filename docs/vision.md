@@ -33,7 +33,7 @@ fallback, it is the other supported mode, and the firmware needs no change eithe
 offers a vision URL only when it has a model, so with none configured the camera has nowhere to send
 anything.
 
-## What it costs
+## What it replaces
 
 The camera works today: he takes a photo, tone-maps it on the device and shows it on his own screen.
 What he cannot do is *describe* it. That is deliberate — see [the privacy checklist](privacy.md). The
@@ -86,7 +86,7 @@ then *says that out loud*, in a room where it is not true. A vision feature that
 desk.
 
 **So the camera work was not a prerequisite for vision — it was the larger half of it.** Three days of
-[exposure work](camera.md) bought more accuracy than any change of model could have. If your
+[exposure work](#settled-the-picture) bought more accuracy than any change of model could have. If your
 descriptions read as nonsense, photograph something and check the frame before you change the model:
 below roughly 35 mean luma this model is guessing, and it does not sound like it is guessing.
 

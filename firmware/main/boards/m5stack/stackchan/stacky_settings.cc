@@ -18,9 +18,13 @@ constexpr int kPad = 8;
 
 // Every event callback gets the StackySettings through the button's user data,
 // so none of this needs a singleton.
-struct RowCtx {
-    StackySettings* self;
-};
+//
+// ⚠️ There was a `struct RowCtx { StackySettings* self; }` here, assigned on
+//    every AddRow and passed to nothing - the callback was always registered
+//    with `this` directly. It compiled, it warned, and it had a confident
+//    comment explaining a mechanism that was not in use. Dead code with
+//    documentation is harder to remove than dead code without, because the
+//    comment argues for it.
 
 // 📐 One trim button's worth of intent. LVGL hands a callback exactly one
 //    user-data pointer, and the trim buttons need two facts each - who to call
@@ -106,8 +110,6 @@ lv_obj_t* StackySettings::AddRow(const char* text, lv_event_cb_t cb) {
     lv_obj_set_style_text_color(label, c_text_, 0);
     lv_obj_align(label, LV_ALIGN_LEFT_MID, 4, 0);
 
-    static RowCtx ctx;   // one shared context is enough: `self` is a singleton
-    ctx.self = this;     // per board, and the callbacks only ever need `self`.
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, this);
     return btn;
 }
