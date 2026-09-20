@@ -50,7 +50,7 @@ def card_for(v, fits):
 #    presented under one heading, is a lie that reads perfectly.
 import sys as _sys
 
-machine = _sys.argv[1] if len(_sys.argv) > 1 else "rtx-4090-24gb-ollama-defaults"
+machine = _sys.argv[1] if len(_sys.argv) > 1 else "rtx-4090-24gb"
 src = OUT / "results" / machine
 if not src.is_dir():
     legacy = sorted(OUT.glob("result-*.json"))

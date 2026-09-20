@@ -2,8 +2,7 @@
 # Measure every model Ollama has, and a second pass without reasoning for any
 # model that actually reasons.
 #
-#   ./sweep.sh                            everything, against localhost
-#   ./sweep.sh "RTX 5060 8GB"             label the results with the hardware
+#   ./sweep.sh "RTX 5060 8GB"             ALWAYS pass the card - see below
 #   OLLAMA=http://box:11434 ./sweep.sh    somewhere else
 #
 # 🔑 ONE MODEL RESIDENT AT A TIME. Ollama keeps the last model loaded while the
@@ -19,7 +18,19 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 OLLAMA="${OLLAMA:-http://127.0.0.1:11434}"
-LABEL="${1:-$(hostname)}"
+# 🔴 NEVER DEFAULT THIS TO $(hostname). The label is written verbatim into every
+#    result file as "hardware" AND used as the results directory name, and it is
+#    the one field here that is not redacted - redact_host() covers the endpoint,
+#    nothing covers this. These files are meant to be sent to a public issue, so
+#    a hostname default publishes the contributor's machine name on the one path
+#    nobody chooses: running the bare command shown at the top of this file.
+LABEL="${1:-}"
+if [ -z "$LABEL" ]; then
+    LABEL="unlabelled"
+    echo "No label given - results will be filed under 'unlabelled'." >&2
+    echo "Re-run with the card, e.g. ./sweep.sh \"RTX 4090 24GB\", or the numbers" >&2
+    echo "cannot be compared against anybody else's." >&2
+fi
 
 # 🔴 ONE DIRECTORY PER MACHINE. Results used to be named result-<model>.json
 #    with the hardware recorded only inside, so a second machine overwrote the
@@ -27,6 +38,14 @@ LABEL="${1:-$(hostname)}"
 #    2.5 GB where it had measured 5.0 GB an hour before is both a real
 #    difference between cards AND what a clobbered file looks like - which is
 #    the problem: nothing about it looks wrong.
+#
+# 🔑 THE LABEL NAMES THE MACHINE, AND NOTHING ELSE. The directory is derived
+#    from it, so a qualifier in the label splits one card across two
+#    directories: this sweep once ran as "RTX 4090 24GB, ollama defaults" while
+#    vision-bench.py labelled the same card "RTX 4090 24GB", and the card's
+#    evidence sat in two places that looked like two machines. Settings belong
+#    in the run, not in the card's name - "hardware" inside each file still
+#    records exactly what was measured.
 RESULTS="results/$(echo "$LABEL" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-')"
 mkdir -p "$RESULTS"
 echo "results -> $RESULTS"
