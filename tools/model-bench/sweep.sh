@@ -38,6 +38,14 @@ fi
 #    2.5 GB where it had measured 5.0 GB an hour before is both a real
 #    difference between cards AND what a clobbered file looks like - which is
 #    the problem: nothing about it looks wrong.
+#
+# 🔑 THE LABEL NAMES THE MACHINE, AND NOTHING ELSE. The directory is derived
+#    from it, so a qualifier in the label splits one card across two
+#    directories: this sweep once ran as "RTX 4090 24GB, ollama defaults" while
+#    vision-bench.py labelled the same card "RTX 4090 24GB", and the card's
+#    evidence sat in two places that looked like two machines. Settings belong
+#    in the run, not in the card's name - "hardware" inside each file still
+#    records exactly what was measured.
 RESULTS="results/$(echo "$LABEL" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-')"
 mkdir -p "$RESULTS"
 echo "results -> $RESULTS"
