@@ -21,6 +21,12 @@ right — which is why this is a matrix rather than a recommendation.
 ./server/use-model.sh qwen3:8b          # or mistral-nemo:12b
 ```
 
+📷 **The "with an eye too" column is measured, and the numbers behind it are in
+[vision.md](vision.md#it-fits-alongside-the-chat-model--above-8-gb)** — VRAM per vision model, cost per
+photo warm, which pairs stay resident together and which get evicted. It lives there rather than here
+because it is the same benchmark asking a different question, but this is where people come looking
+for it, so: that way.
+
 > These are floors, not verdicts. Everything that shapes how the robot *talks* is fitted to
 > `mistral-nemo:12b`, so changing the model hands you the tuning too — see
 > [If you change the model, the tuning comes with it](#if-you-change-the-model-the-tuning-comes-with-it).
@@ -53,6 +59,11 @@ saying so.
 | `granite4:tiny-h` | 83%, 122 tok/s, 4.7 GB | 90%, 84 tok/s, 4.4 GB |
 | `granite4:micro` | 83%, 209 tok/s, 5.0 GB | 71%, 84 tok/s, 2.5 GB |
 | `qwen3:4b` *no-think* | 78%, 212 tok/s, 7.5 GB | 81%, 50 tok/s, 3.2 GB |
+
+📷 **Vision is benchmarked the same way, on the same two cards** — see
+[vision.md](vision.md#at-8-gb-it-is-a-choice-and-it-was-measured-on-a-real-8-gb-card). The short
+version: on 24 GB an eye is an addition, on 8 GB it is a choice, because loading it evicts any chat
+model that does not leave room.
 
 Three things only a second card could show:
 
