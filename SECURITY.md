@@ -1,62 +1,72 @@
-# Security
+# Security and privacy reporting
 
-Report anything to **petrdraxler@gmail.com**. A GitHub issue is fine too for
-things that are not sensitive — most of what follows is already written down in
-public, because a privacy project that hides its weak points is not one.
+This project exists because the firmware it replaces sends audio from an
+always-on microphone, and photographs from a camera pointed at a room, to a
+service the owner does not control. So a defect that **leaks data off the
+owner's network is the most serious kind of bug this project can have**, and it
+is treated that way — ahead of anything about the robot's behaviour.
 
-This is a side project maintained by one person. Expect a reply in days rather
-than hours, and expect honesty about what will and will not be fixed.
+## How to report
 
----
+**Please do not open a public issue for anything that leaks data or gets code
+onto a device.** Use either:
+
+- GitHub's **[private vulnerability reporting](https://github.com/DrakTheDude/stackchan-local-llm/security/advisories/new)**
+  on this repository, or
+- **petrdraxler@gmail.com**
+
+This is a hobby project maintained by one person, so there is no response SLA.
+A realistic expectation is a few days. If something is being actively exploited
+against real owners, say so in the subject line.
 
 ## What is in scope
 
-- The **firmware** in `firmware/main/boards/m5stack/stackchan/` and the changes
-  this project makes to the vendored tree.
-- The **patch kit** in `server/patches/`, which rewrites parts of the server at
-  image build time.
-- The **browser flasher** and the released binaries.
-- **Documentation that tells you to do something unsafe.** A wrong instruction
-  in a guide is a real vulnerability when people follow it.
+- Anything that sends audio, images, transcripts or credentials off the local
+  network, on any code path, including error and fallback paths
+- A privacy switch that does not do what the UI says — the microphone mute is
+  meant to close the input device, not merely discard samples
+- Wi-Fi credentials, tokens or keys recoverable from a build artefact, a release
+  binary, this repository, or its git history
+- Anything in the flashing path that could serve a device an image other than
+  the one the release published
+- The documented [privacy checks](docs/privacy.md) passing on a build that is in
+  fact talking to something remote — a check that cannot fail is the worst
+  defect here, because it converts a verifiable claim into a false one
 
-## What is not
+## What is out of scope
 
-Report these to the projects that own them — they are vendored or depended on,
-not written here:
+- **Upstream projects.** The firmware forks
+  [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) and the server patches
+  [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server).
+  A flaw in their code should go to them — though please tell us too, since this
+  project pins their versions and may need to move the pin.
+- **The factory firmware.** What the stock robot talks to is documented in
+  [docs/factory-firmware.md](docs/factory-firmware.md) as measured fact. It is
+  not this project's to fix, and reports about it belong with M5Stack.
+- **Physical access to the device.** Anyone holding the robot with a USB cable
+  can reflash it. That is a property of the hardware and the reason the browser
+  flasher works at all.
+- **The model you point it at.** A local LLM can be prompted into saying
+  something foolish, and it can call a tool badly. Tool exposure is the owner's
+  decision — see [docs/tool-safety.md](docs/tool-safety.md), which is why the
+  documented default is read-only.
 
-- `xiaozhi-esp32` and `xiaozhi-esp32-server` upstream
-- ESP-IDF, Ollama, llama.cpp, Kokoro, Whisper/speaches
-- Anything in `firmware/managed_components/`
+## What this project does not protect you from
 
-## Things that are already known, and deliberate
+[docs/privacy.md](docs/privacy.md) has the honest version, and it is worth
+reading before deciding this repository makes your robot private. Briefly: it
+keeps traffic on your network, it does not make your network safe, it does not
+encrypt what sits on your own disk, and anything you deliberately connect it to
+over MCP can see what you send it.
 
-These are design decisions with their reasoning written down. Telling us again
-is welcome but will get this answer:
+## 🔴 Do not attach a firmware dump to your report
 
-| | |
-|---|---|
-| **NVS is not encrypted.** Whoever holds the robot can read the ambient-status token out of flash with a cable | [mcp_status_source.h](firmware/main/boards/m5stack/stackchan/mcp_status_source.h) says so, and says to use a read-only, revocable, LAN-scoped credential and nothing more |
-| **Voice has no confirmation step.** A misheard sentence reaches whatever a tool reaches | [tool-safety.md](docs/tool-safety.md). Read-only tools by default, and an allowlist for anything that changes the world |
-| **The robot has an always-on microphone and a camera** | That is what it is. Both have switches that persist across a reboot, and the mute is visible on screen because one you cannot see is one you will forget |
-| **A local vision model sees your room** | It is off unless you configure one, and the frames are not kept unless you turn that on. [privacy.md](docs/privacy.md) |
-| **Four upstream tools were removed rather than disabled** | Upstream's "user only" marking hides a tool from the listing and then runs it by name anyway. [robot-tools.md](docs/robot-tools.md) |
+The natural thing to send with a hardware bug is a full-flash backup, and **it
+contains your Wi-Fi password in plain text** — along with anything else NVS is
+holding. The same goes for an NVS backup on its own.
 
-## What would genuinely worry us
-
-- A way for the **server** to make the robot do something the tool list does not
-  allow — the firmware's MCP surface is meant to be the whole surface.
-- Anything that makes the **microphone or camera switch lie** — they close the
-  input device and refuse at capture respectively, and both are asserted.
-- A path by which a **released binary differs from the source** it claims to
-  come from. CI asserts the chip, the board, the OTA URL and the contents of the
-  assets partition; [releasing.md](docs/releasing.md) has the checks and the
-  releases each carry a `SHA256SUMS`.
-- **Anything that phones home.** [privacy.md](docs/privacy.md) is six checks you
-  can run yourself; a result that contradicts it is the report we most want.
-
-## If you are reporting about your own robot
-
-Please do not send us a **full-flash dump** or an NVS backup. They contain your
-Wi-Fi password in plain text. `BOARD_REPORT` over the serial console prints
-what we usually need and deliberately carries no MAC address and no network
-name — see the [board README](firmware/main/boards/m5stack/stackchan/README.md).
+`BOARD_REPORT` over the USB serial console prints what is usually needed: the
+I²C scan, the rail, the servos and their calibration source, the LED chain, the
+codec and the camera's registers. It carries **no MAC address and no network
+name**, so it is safe to paste into a public issue. See the
+[board README](firmware/main/boards/m5stack/stackchan/README.md).

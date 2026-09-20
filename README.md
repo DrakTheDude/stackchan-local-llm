@@ -13,10 +13,11 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 > **[Flash it from your browser](https://drakthedude.github.io/stackchan-local-llm/flash/)** — no toolchain, nothing to install — or build it
 > yourself from this tree.
 >
-> Verified on **one** StackChan, and the model measurements on **two** GPUs — which was enough for
-> them to disagree, and that disagreement is the most useful thing on the page. A second robot, or a
-> third card, would be worth more than any feature: [CONTRIBUTING.md](CONTRIBUTING.md) says what to
-> send and what not to (no full-flash dumps — they carry your Wi-Fi password).
+> Verified on **one** StackChan. The model measurements cover **two** cards — a desktop RTX 4090 and
+> a mobile RTX 5060 — and they rank models differently. If you have either a second robot or another
+> card, a report from it is the most useful thing you could contribute — see
+> [CONTRIBUTING.md](CONTRIBUTING.md) for what to send and what **not** to (no full-flash dumps: they
+> carry your Wi-Fi password), and [tools/model-bench](tools/model-bench) if it is the GPU.
 
 > ⚠️ **Flashing writes to the device, and an interrupted write can brick it.** Most failures are
 > recoverable — the ESP32 has a bootloader that survives a bad app image, and M5Burner can restore a
@@ -51,7 +52,7 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 | **[Quickstart](docs/quickstart.md)** | factory robot → local robot, the whole path including the server. Back up first; that step is not optional |
 | **[What you gain and lose](docs/stock-vs-local.md)** | honestly, against the firmware it shipped with. He will not dance any more |
 | **[Standing up your own model](docs/your-llm.md)** | NVIDIA, Apple Silicon, AMD, or something else entirely — and the one check that tells you whether your GPU is really being used |
-| **[Which model do you need](docs/model-floor.md)** | fifteen models measured on one card: tool calling, time to first spoken word, VRAM. Most of our guesses were wrong |
+| **[Which model do you need](docs/model-floor.md)** | fifteen models measured on two cards, desktop and mobile: tool calling, time to first spoken word, VRAM. The two disagree, and most of our guesses were wrong |
 | **[Giving him tools](docs/mcp.md)** | one JSON file, three transports, and what makes a model actually choose a tool |
 | **[Giving him tools, safely](docs/tool-safety.md)** | read-only by default, and why hiding a tool is not the same as disabling it |
 | **[What he does, and why](docs/behaviour.md)** | the face, the head, the ring, the wake word — and which of them are telling you something is wrong |
@@ -85,4 +86,4 @@ pointed at your own factory backup. Look at what your robot dials before you dec
 - [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) — ESP32 voice assistant firmware (MIT)
 - [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) — the voice pipeline server (MIT)
 
-Licensed MIT — see [LICENSE](LICENSE), which also carries the upstream notices.
+Licensed MIT — see [LICENSE](LICENSE). Third-party attribution is in [NOTICE.md](NOTICE.md).
