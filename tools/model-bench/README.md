@@ -66,6 +66,8 @@ python3 make-table.py
 
 ## If you run this on your own machine
 
-Results from a different card are the most useful thing you can contribute — the
-whole table is currently one GPU. Send the JSON files and the label; failures are
-worth more than successes.
+Results from a different card are the most useful thing you can contribute. The
+table currently covers two — a desktop RTX 4090 (24 GB) and a mobile RTX 5060
+(8 GB) — and they rank models differently, which is the reason a third is worth
+having: it starts to say which of the two generalises. Send the JSON files and
+the label; failures are worth more than successes.

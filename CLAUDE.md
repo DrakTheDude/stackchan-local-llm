@@ -5,7 +5,10 @@ language model running on the owner's own machine, and nothing leaves their netw
 
 By Drax and Claude. Built with Claude Code.
 
-🚧 **Early work in progress.** Nothing here is usable yet; see [docs/roadmap.md](docs/roadmap.md).
+**Working on real hardware, and released.** Voice, face, head, LED ring, camera, wake word, the
+settings menu and the privacy switches are all in daily use on the reference robot, and there are
+tagged releases with a browser flasher. Verified on **one** robot; what is still unproven, and what
+is next, is in [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
