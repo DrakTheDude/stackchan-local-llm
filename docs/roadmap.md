@@ -327,7 +327,7 @@ Full English docs, and a path from a factory device to a local robot in about 30
   those existed, and the check that would have caught all three is a blunt size floor.
 - ✅ License (MIT) with upstream notices preserved, and the attribution on the front page
 
-## Privacy you can verify 🟡
+## Privacy you can verify ✅
 
 The reason the project exists, so it gets a page of its own rather than a promise.
 
@@ -335,7 +335,21 @@ The reason the project exists, so it gets a page of its own rather than a promis
   expected output, plus what the project does **not** protect against. The firmware URL scan is run and its
   real output published: one configured address, the robot's own setup AP, an XML namespace and a doc link
   printed in a log message. No NTP server either, so the clock comes from your own server.
-- ⬜ What the factory firmware sends, and where, as far as can be established
+- ✅ **[What the factory firmware talks to](factory-firmware.md)**, as far as static analysis can
+  establish it — the same two commands as check 1 of privacy.md, run against the backed-up factory app
+  partition. Found: the hardcoded `api.tenclass.net` OTA endpoint, a WebSocket and four device
+  endpoints at a **bare IP with no hostname** (four of them over plain `http://`), and a call that
+  **registers the MAC address**. Plus the three that are *not* endpoints, listed so nobody
+  re-derives them in alarm.
+
+  🔑 **The OTA endpoint hands over the rest**, which makes that list a lower bound rather than a set —
+  anything it returns is also a destination. That is the reason this project reflashes rather than
+  reconfigures.
+
+  🔴 **On the app partition, never a full dump**, and the page says so twice: NVS holds the Wi-Fi
+  password in plain text. What it deliberately does *not* claim is also written down — no packet
+  capture was made, a URL in a binary is a capability and not an event, and none of it establishes
+  intent.
 
 ## Release ✅
 

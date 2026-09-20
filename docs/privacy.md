@@ -172,7 +172,9 @@ A checklist that only lists reassurances is marketing. These are real and unfixe
 - **MCP servers you add.** Tools you mount can do whatever they do. That is the point of them, and it
   is your judgement.
 - **The backup you made.** The factory firmware backup contains your Wi-Fi password in plain text. Keep
-  it off cloud sync and out of any repository.
+  it off cloud sync and out of any repository. ⚠️ Running check 1 against it is worth doing — that is
+  [factory-firmware.md](factory-firmware.md) — but run it on the **app partition**, never on the
+  full-flash dump. The password is in the dump.
 - **Supply chain.** You are trusting ESP-IDF, the upstream firmware, the Docker images and this
   project. The checks above test *behaviour*, not the good intentions of everyone upstream.
 
