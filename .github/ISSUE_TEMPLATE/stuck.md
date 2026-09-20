@@ -2,7 +2,7 @@
 name: I got stuck
 about: A step did not work, or the docs assumed something you did not have
 title: ""
-labels: docs
+labels: documentation
 ---
 
 **Getting stuck is a documentation bug, not a user error.** This project was written by someone who
