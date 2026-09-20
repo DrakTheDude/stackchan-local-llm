@@ -6,6 +6,7 @@
 #include <esp_app_desc.h>
 #include <esp_netif.h>
 #include "status_source.h"
+#include "mcp_status_source.h"
 #include "wifi_board.h"
 #include "cores3_audio_codec.h"
 #include "display/lcd_display.h"
@@ -1759,11 +1760,27 @@ public:
         RegisterCameraTool();
         RegisterSpeakerTool();
         leds_.BootSweep();
+
+        // 🔔 Ambient status, if the owner has pointed him at a status server.
+        //
+        // Unconditional: this is the channel the URL arrives on, so a robot that
+        // has never been provisioned still has to be listening. It reads the USB
+        // serial peripheral directly and touches no console setting - see
+        // mcp_status_source.cc for why that distinction cost a wedged port.
+        McpStatusSource::ProvisionFromSerial();
+        // The poller itself is NOT unconditional. No URL stored, no task, no
+        // traffic: an unconfigured robot must not be a robot that quietly talks
+        // to something.
+        if (McpStatusSource::Configured()) {
+            static McpStatusSource status;
+            AttachStatusSource(&status);
+            status.Start();
+        }
     }
 
     // Wires an ambient status source into the LED ring, the idle status screen
-    // and spoken alerts. Nothing calls this yet - see status_source.h. Call it
-    // at most once, after construction.
+    // and spoken alerts. Call it at most once, after construction - which the
+    // constructor above does for McpStatusSource when one has been provisioned.
     void AttachStatusSource(StatusSource* source) {
         if (source == nullptr || status_ != nullptr) return;
         status_ = source;

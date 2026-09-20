@@ -1064,6 +1064,17 @@ idf_component_register(SRCS ${SOURCES}
                         esp_eth
                         esp_driver_gpio
                         esp_driver_uart
+                        # ⚠️ Unconditional, and it was a board-conditional first.
+                        #    COMPONENT REQUIREMENTS ARE RESOLVED BEFORE sdkconfig
+                        #    EXISTS, so an if(CONFIG_...) around one of these is
+                        #    not a condition - it is always false, and it fails as
+                        #    a missing header in a file that plainly includes it.
+                        #    (The CONFIG_ guards further up work because they only
+                        #    pick SOURCES, which is a later phase.)
+                        #    Needed by mcp_status_source.cc, which reads the USB
+                        #    serial peripheral directly for its provisioning lines.
+                        esp_driver_usb_serial_jtag
+                        esp_http_client
                         esp_driver_spi
                         esp_driver_i2c
                         esp_driver_i2s

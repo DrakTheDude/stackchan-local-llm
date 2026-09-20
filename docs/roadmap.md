@@ -212,10 +212,14 @@ project proved the path end to end.
   credentials go, how to tell whether it worked, and what makes a model actually *choose* a tool.
   Including the trap that `transport` defaults to `sse`, so pointing at a streamable-HTTP server
   without saying so connects and then silently offers no tools.
-- ⬜ **Ambient status contract:** the small tool shape the robot polls to drive its ring, idle screen and
-  spoken alerts — e.g. a level (`ok` / `warn` / `alert`), a one-line summary, optional cards. Off by default.
-- ⬜ **Reference status server** — a few dozen lines, so the ring and idle screen can be tried with no
-  homelab. The reference project's homelab integration becomes one example, not a requirement.
+- ✅ **Ambient status contract** — [ambient-status.md](ambient-status.md). One stateless JSON-RPC POST
+  to one named tool; a level (`ok` / `warn` / `alert`), a spoken sentence, up to six cards. Off until a
+  URL is provisioned over USB serial, and the level is never inferred from the words in the summary.
+  Not JSON at all still works, at reduced function: you get the sentence, you do not get a colour.
+- ✅ **Reference status server** — [tools/status-server/](../tools/status-server/): one file, no
+  dependencies, reports the machine it runs on, and `--demo` cycles ok → warn → alert so the ring, the
+  chime and the double-take can all be seen in a minute with no homelab. It answers `tools/list` too,
+  so the same URL doubles as an MCP server for the model.
 - ✅ **The robot's own tools** — [robot-tools.md](robot-tools.md): all fourteen, what each takes,
   and the four upstream ships that this firmware removes rather than hides. Plus the three things
   tuning them taught, which are the useful part for anybody writing their own.

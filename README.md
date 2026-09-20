@@ -53,6 +53,7 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 | **[Which model do you need](docs/model-floor.md)** | fifteen models measured on one card: tool calling, time to first spoken word, VRAM. Most of our guesses were wrong |
 | **[Giving him tools](docs/mcp.md)** | one JSON file, three transports, and what makes a model actually choose a tool |
 | **[Giving him tools, safely](docs/tool-safety.md)** | read-only by default, and why hiding a tool is not the same as disabling it |
+| **[Making him speak first](docs/ambient-status.md)** | the ring carries something's health, and a change gets announced without anyone asking. Off until you point him at a server |
 | **[Letting him see](docs/vision.md)** | a vision model on your own card, about 4 GB and a third of a second per photo — and what it costs you in the privacy checks |
 | **[Check the privacy claim](docs/privacy.md)** | six checks you can run yourself, and what this does *not* protect you from |
 | **[Roadmap](docs/roadmap.md)** | what is done, what is next, and what is still verified on only one robot |
