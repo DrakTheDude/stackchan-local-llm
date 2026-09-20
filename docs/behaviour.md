@@ -150,8 +150,12 @@ do it more.
 
 ## Standby
 
-After 90 seconds idle the screen dims; after 300 he goes to standby. Touching
-the screen or saying his name brings him back.
+After 90 seconds idle the screen dims, and after 300 he powers off — but only on
+battery, because on a wall socket there is nothing to protect. Touching the
+screen or saying his name brings him back.
+
+Both are rows in the settings menu now, `never` included, so those numbers are
+the defaults rather than the rule.
 
 With a status source configured, standby is not a blank screen — it becomes a
 rotating card of whatever he is watching, one card every 5 seconds, **with the
@@ -165,7 +169,7 @@ hour old is worse than a blank one.
 | | |
 |---|---|
 | **tap the screen** | wake him, same as the wake word |
-| **hold the screen for five seconds** | the settings menu — Wi-Fi and server, volume, brightness, body and mood, the self-check, the privacy switches |
+| **hold the screen for five seconds** | the settings menu — Wi-Fi and server, volume, brightness, body and mood, **head trim**, how long before he dims and powers off, the self-check, the privacy switches |
 | **`BOARD_REPORT`** over USB serial | everything the firmware assumes about the hardware, read back from it. See the [board README](../firmware/main/boards/m5stack/stackchan/README.md) |
 
 And one thing he does at boot that is worth listening for: **the chime is a test

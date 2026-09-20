@@ -47,6 +47,19 @@ void PowerSaveTimer::SetEnabled(bool enabled) {
     }
 }
 
+void PowerSaveTimer::SetTimings(int seconds_to_sleep, int seconds_to_shutdown) {
+    seconds_to_sleep_ = seconds_to_sleep;
+    seconds_to_shutdown_ = seconds_to_shutdown;
+    // Not cosmetic. ticks_ has been counting against the OLD limit, so a robot
+    // that has been idle four minutes and is then told "dim after five" would
+    // otherwise dim on the very next tick - which reads as the setting doing the
+    // opposite of what it says. WakeUp() also undoes a dim already in progress,
+    // which is what somebody changing this setting is looking at.
+    WakeUp();
+    ESP_LOGI(TAG, "timings now: sleep %ds, shutdown %ds", seconds_to_sleep_,
+             seconds_to_shutdown_);
+}
+
 void PowerSaveTimer::OnEnterSleepMode(std::function<void()> callback) {
     on_enter_sleep_mode_ = callback;
 }

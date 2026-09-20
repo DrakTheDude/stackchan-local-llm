@@ -500,6 +500,11 @@ private:
     volatile int32_t touch_x_ = 0, touch_y_ = 0;
     volatile bool touch_down_ = false;
     PowerSaveTimer* power_save_timer_;
+    // 🕐 Idle timings, per robot. Held here as well as in the timer because the
+    //    menu has to be able to SHOW them, and the timer's copies are private.
+    int dim_secs_ = 90;
+    int off_secs_ = 300;
+
     // Optional ambient status - see status_source.h. Null in this build.
     StatusSource* status_ = nullptr;
     // The level he has already reacted to, which is NOT the same thing as the
@@ -519,9 +524,14 @@ private:
     //    shutdown callback. Sleep is a display concern; shutdown is a battery
     //    concern.
     void InitializePowerSaveTimer() {
-        // 90s to dim. cpu_max_freq -1 keeps the CPU/wake-word path untouched -
+        // 90s to dim, 300s to power off on battery - the defaults, now only the
+        // defaults: both are stored per robot and changed from the settings
+        // menu. cpu_max_freq -1 keeps the CPU/wake-word path untouched, because
         // he must still hear his name while the screen is down.
-        power_save_timer_ = new PowerSaveTimer(-1, 90, 300);
+        Settings settings("stackchan", false);
+        dim_secs_ = settings.GetInt("dim_secs", 90);
+        off_secs_ = settings.GetInt("off_secs", 300);
+        power_save_timer_ = new PowerSaveTimer(-1, dim_secs_, off_secs_);
         power_save_timer_->OnEnterSleepMode([this]() {
             // SetPowerSaveMode is what raises StackyFace's idle status screen.
             GetDisplay()->SetPowerSaveMode(true);
@@ -946,6 +956,19 @@ private:
             ESP_LOGW(TAG, "camera %s", off ? "OFF" : "on");
         };
 
+        a.dim_label = [this]() { return SecsLabel(dim_secs_); };
+        a.next_dim = [this]() {
+            dim_secs_ = NextChoice(kDimChoices, dim_secs_);
+            ApplyIdleTimings();
+            return SecsLabel(dim_secs_);
+        };
+        a.off_label = [this]() { return SecsLabel(off_secs_); };
+        a.next_off = [this]() {
+            off_secs_ = NextChoice(kOffChoices, off_secs_);
+            ApplyIdleTimings();
+            return SecsLabel(off_secs_);
+        };
+
         // 📐 The head trim, live. Every nudge changes the centre and re-centres
         //    him on it, so the adjustment is something you watch rather than a
         //    number you compute.
@@ -1012,12 +1035,34 @@ private:
                 info.ip.addr != 0) {
                 snprintf(ip, sizeof(ip), IPSTR, IP2STR(&info.ip));
             }
+            // 🔔 The ambient status source gets a home on the screen - a
+            //    READ-ONLY one. Where he is polling is something you should be
+            //    able to check standing in front of him; the token is not, and
+            //    a settings page is exactly where a guest would find it. So the
+            //    URL is shown and the token is only ever counted.
+            //
+            //    This is also why it is provisioned over the serial cable: that
+            //    already requires holding the robot. See mcp_status_source.h.
+            std::string status = "off";
+            {
+                Settings s("status", false);
+                const std::string url = s.GetString("url");
+                if (!url.empty()) {
+                    status = url;
+                    if (!s.GetString("token").empty()) status += "  (token set)";
+                }
+            }
+            char trim[32];
+            snprintf(trim, sizeof(trim), "pan %+d, tilt %+d", ScsServo::PanTrim(),
+                     ScsServo::TiltTrim());
             return std::vector<std::pair<std::string, std::string>>{
                 {"Firmware", esp_app_get_description()->version},
                 {"Address", ip},
                 {"Server", server},
                 {"Servos", ScsServo::calibration_is_fallback() ? "FALLBACK calibration"
                                                                : "factory calibration"},
+                {"Trim", trim},
+                {"Status", status},
             };
         };
         return a;
@@ -1731,6 +1776,50 @@ public:
         // Silence is what a flat battery and a broken amplifier both sound like.
         Application::GetInstance().PlaySound(
             ok ? Lang::Sounds::OGG_SUCCESS : Lang::Sounds::OGG_EXCLAMATION);
+    }
+
+    // 🕐 THE IDLE TIMINGS, AS A ROW EACH.
+    //
+    //    Stepping through a handful of choices rather than a slider, for the
+    //    same reason Body and Mood do: the menu is a column of rows, and four
+    //    values do not need a picker. The choices are what somebody actually
+    //    wants - a desk robot that dims quickly, one that stays lit while you
+    //    work, or one that never dims at all.
+    //
+    // 🔴 "Never" is a real choice and is -1, not a very large number. A robot
+    //    that dims after nine hours is a robot that dims, and somebody who
+    //    turned it off would find out at the worst possible moment.
+    static constexpr int kDimChoices[] = {30, 90, 300, -1};
+    static constexpr int kOffChoices[] = {120, 300, 900, -1};
+
+    static const char* SecsLabel(int secs) {
+        static char buf[16];
+        if (secs < 0) return "never";
+        if (secs < 60) {
+            snprintf(buf, sizeof(buf), "%ds", secs);
+        } else {
+            snprintf(buf, sizeof(buf), "%d min", secs / 60);
+        }
+        return buf;
+    }
+
+    // Steps to the next choice, applies it, stores it, returns its label. If the
+    // stored value is not in the list - an older build, or a hand-edited NVS -
+    // the first choice is next, which is a defined answer rather than a search
+    // that fails.
+    template <size_t N>
+    static int NextChoice(const int (&choices)[N], int current) {
+        for (size_t i = 0; i < N; i++) {
+            if (choices[i] == current) return choices[(i + 1) % N];
+        }
+        return choices[0];
+    }
+
+    void ApplyIdleTimings() {
+        power_save_timer_->SetTimings(dim_secs_, off_secs_);
+        Settings settings("stackchan", true);
+        settings.SetInt("dim_secs", dim_secs_);
+        settings.SetInt("off_secs", off_secs_);
     }
 
     // 🧪 THE BOOT-TIME I2C STALL, WATCHED RATHER THAN SURVIVED.

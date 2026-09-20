@@ -43,7 +43,7 @@ worth more to this project than any feature on this list.
 
 ---
 
-## 1. Firmware and platform 🟡
+## 1. Firmware and platform ✅
 
 English-first board support, with every hardware assumption written down next to how to check it.
 
@@ -60,8 +60,8 @@ English-first board support, with every hardware assumption written down next to
   camera switch refuses at the point of capture. Both persist across a reboot and the mute shows on
   screen, because a mute you cannot see is one you will forget.
 - ✅ **"The mouth stops moving after a photo" — it never did.** Reported and closed 2026-09-19. The
-  face is *hidden behind the photo*, and the photo now stays up for twenty seconds, so most of the
-  reply is delivered with no face on screen at all. The mouth resumes the instant the photo goes away,
+  face is *hidden behind the photo*, and the photo was staying up for twenty seconds, so most of the
+  reply was delivered with no face on screen at all. The mouth resumes the instant the photo goes away,
   which is what the capture shows and what watching it confirms:
 
   ```
@@ -116,8 +116,9 @@ English-first board support, with every hardware assumption written down next to
   Flashing the app partition leaves NVS alone, so the values are there on every unit. The travel
   limits are now spans around *that* centre, which was the safety part: tilt has only ~90° before a
   mechanical stop. The old constants remain as a fallback that announces itself loudly. The separate
-  bench trim is `CONFIG_STACKCHAN_PAN_TRIM`, defaulting to 0 — it is per-unit and guessing makes it
-  worse. Verified: read `servo/460/620` on the reference unit, matching its disassembled backup.
+  bench trim is set on the robot, from the settings menu, with `CONFIG_STACKCHAN_PAN_TRIM` surviving
+  only as its default — it is per-unit, and guessing makes it worse. Verified: read `servo/460/620` on
+  the reference unit, matching its disassembled backup.
 - ✅ **Server address configurable after flashing.** Mostly already built upstream, which is worth
   recording: `Ota::GetCheckVersionUrl()` reads `ota_url` from NVS with the compiled value as fallback,
   the config portal has the field that writes it, and this tree already enabled the flag that shows it.
@@ -160,7 +161,7 @@ English-first board support, with every hardware assumption written down next to
   registers and the privacy switches — fixed order, fixed labels, so two units produce two reports that
   **diff**. Deliberately no MAC address and no Wi-Fi name: a report meant to be pasted into an issue
   must not carry an identifier for the person pasting it.
-- 🟡 **Finish moving settings onto the robot.** The on-screen menu has Wi-Fi & server, volume,
+- ✅ **Settings live on the robot.** The on-screen menu has Wi-Fi & server, volume,
   brightness, body and mood, the self-check, About, the privacy switches — and now the **head trim**,
   which was the one number every owner had to set for their own robot by editing a Kconfig and
   rebuilding the firmware, for something you decide by looking at him. It is a live preview, as it had
@@ -169,9 +170,17 @@ English-first board support, with every hardware assumption written down next to
   straight makes the screen useless. Save writes to NVS; Back puts back what the page opened with. The
   build setting survives as the *default*, so an untrimmed robot behaves exactly as before.
 
-  What is left: the ambient **status source** URL and token are typed in over USB serial — a home, but
-  not an on-screen one, and deliberately so, because a token should not be somewhere a guest can read
-  it off the robot's own face. Screen and standby timeouts are still compiled in.
+  **Screen dims** and **Power off on battery** are rows too, stepping a few choices each — `never` is
+  one of them, and it is `-1` rather than a very large number, because a robot that dims after nine
+  hours is still a robot that dims and whoever turned it off would find out at the worst moment. Both
+  persist, and changing one resets the idle counter: otherwise lengthening the time before he dims
+  makes him dim on the next tick, which reads as the setting doing the opposite of what it says.
+
+  The ambient **status source** stays on the serial cable, and that is the decision rather than the
+  gap: the URL is now shown read-only on the About page, so you can check where he is polling while
+  standing in front of him, and the token is only ever reported as *set*. A settings page is exactly
+  where a guest would look for a credential, and serial provisioning already requires holding the
+  robot.
   ⚠️ A page served on the LAN would be easier to type into, and is a listening socket on a device whose
   selling point is that it does not phone anywhere. If it is ever built, binding, authentication and
   being off by default are deliberate decisions, not afterthoughts.
@@ -252,7 +261,7 @@ Wake word → STT → model → TTS, with every backend a setting rather than a 
 - ✅ CPU-only / non-NVIDIA notes — [your-llm.md](your-llm.md) covers Apple Silicon, AMD and CPU,
   including the one check that tells you whether your GPU is really being used
 
-## 3. Integration interface 🟡
+## 3. Integration interface ✅
 
 **Decided: MCP is the contract — no new API.** It's what most users will already know, the server already
 mounts any MCP server as tools for the model, Home Assistant ships an official MCP server, and the reference

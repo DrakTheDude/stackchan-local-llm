@@ -316,6 +316,26 @@ void StackySettings::BuildList() {
         if (self->actions_.motion_check) self->actions_.motion_check();
     });
 
+    // 🕐 The two idle timings. Worded as what you will SEE rather than as what
+    //    the timer is called: "Screen dims" and "Power off", not "sleep" and
+    //    "shutdown" - and the second says `on battery` because on USB it never
+    //    happens, and a setting that quietly does nothing is worse than one
+    //    that is not offered.
+    dim_row_ = AddRow("Screen dims", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        if (!self->actions_.next_dim) return;
+        self->SetRowLabel(self->dim_row_, "Screen dims", self->actions_.next_dim());
+    });
+    if (actions_.dim_label) SetRowLabel(dim_row_, "Screen dims", actions_.dim_label());
+
+    off_row_ = AddRow("Power off on battery", [](lv_event_t* e) {
+        auto* self = static_cast<StackySettings*>(lv_event_get_user_data(e));
+        if (!self->actions_.next_off) return;
+        self->SetRowLabel(self->off_row_, "Power off on battery",
+                          self->actions_.next_off());
+    });
+    if (actions_.off_label) SetRowLabel(off_row_, "Power off on battery", actions_.off_label());
+
     // 📐 Below Motion check, because they are the same question asked twice:
     //    one shows you how he moves, the other fixes where "straight" is.
     AddRow("Head trim", [](lv_event_t* e) {

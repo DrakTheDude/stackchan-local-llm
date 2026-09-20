@@ -67,6 +67,12 @@ public:
         //    saves; `close_trim(false)` puts back whatever the screen opened
         //    with. Saving on every tap would leave a robot stuck mid-adjustment
         //    if you walked away, which is the one state nobody chooses.
+        // 🕐 The two idle timings, stepped through a handful of choices like
+        //    Body and Mood. Each returns the label of the value it moved to.
+        std::function<const char*()> next_dim;
+        std::function<const char*()> dim_label;
+        std::function<const char*()> next_off;
+        std::function<const char*()> off_label;
         std::function<std::pair<int, int>()> get_trim;   // pan, tilt, in counts
         std::function<void(int, int)> nudge_trim;        // deltas, applied live
         // true = save. The pair is what the page opened with, handed back so a
@@ -122,6 +128,8 @@ private:
     lv_obj_t* cam_switch_ = nullptr;
     lv_obj_t* body_row_ = nullptr;   // relabelled as the body changes
     lv_obj_t* mood_row_ = nullptr;
+    lv_obj_t* dim_row_ = nullptr;
+    lv_obj_t* off_row_ = nullptr;
     lv_obj_t* toast_ = nullptr;    // transient feedback, e.g. the self-check result
 
     // Theme colours, read once at Build() so a restyle is one place to change.

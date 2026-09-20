@@ -11,6 +11,11 @@ public:
     ~PowerSaveTimer();
 
     void SetEnabled(bool enabled);
+    // 🕐 ADDED HERE, not upstream: the two timings after construction, so they
+    //    can be a setting on the robot rather than a rebuild. -1 disables
+    //    either. Resets the idle counter, because the alternative is a robot
+    //    that dims instantly the moment you lengthen the time before he dims.
+    void SetTimings(int seconds_to_sleep, int seconds_to_shutdown);
     void OnEnterSleepMode(std::function<void()> callback);
     void OnExitSleepMode(std::function<void()> callback);
     void OnShutdownRequest(std::function<void()> callback);
