@@ -242,8 +242,12 @@ Wake word → STT → model → TTS, with every backend a setting rather than a 
   only Ollama's native API sets — so no wording can reach it. A template is just text, so
   [`server/no-think.sh`](../server/no-think.sh) builds a variant with that branch pinned. Verified at
   21/21 on tools and 0.07 s to first word, against 4.3 s for the stock model on an 8 GB card.
-- ⬜ The `/no_think` injection is still there and still does nothing useful. Worth removing upstream,
-  since it also puts the instruction in front of the model as part of the user's sentence.
+- ✅ **And the `/no_think` injection is gone from our image.** The patch kit disables it at the flag,
+  asserted like everything else. It could never have worked — the template branch is gated on
+  `$.Think`, which only Ollama's native API sets — and it put the instruction **in front of the model
+  as part of the user's sentence**, so the robot was told every turn that the person in the room had
+  opened with a slash command. A prompt injection with good intentions. Still on the upstream list
+  below, where the condition is time rather than a dependency.
 - ✅ **STT: English-only Whisper by default**, with the reason in the config: the provider never sends a
   language, so a multilingual model auto-detects per utterance and short ones are where that fails.
 - ✅ **TTS: Kokoro by default**, and the voice documented as a **loudness** decision rather than a taste
@@ -393,6 +397,9 @@ and then changed is worse than the same patch sent a fortnight later.
 
 - `xiaozhi-esp32-server`: the TTS sentence splitter missing the ASCII full stop; `.rstrip()` eating the
   spaces between streamed chunks. Both have measured reproductions.
+- `xiaozhi-esp32-server`: the Ollama provider's `/no_think` injection, which cannot reach the chat
+  template through the OpenAI-compatible endpoint and lands in the user's message instead. Disabled
+  here; the right upstream fix is to delete the two blocks rather than the flag.
 - `xiaozhi-esp32`: the StackChan board; a runtime-configurable server address
 - `xiaozhi-esp32`: 14 language packs start `ACCESS_VIA_BROWSER` with a Chinese full-width comma
   (fixed here already)

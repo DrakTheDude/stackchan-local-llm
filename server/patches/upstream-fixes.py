@@ -196,6 +196,43 @@ REPLACEMENTS = [
         "                    max_tokens=2000,",
         "                    max_tokens=700,",
     ),
+    # 🔴 `/no_think` IS PUT IN THE USER'S MOUTH, AND IT DOES NOTHING.
+    #
+    #    The Ollama provider prepends "/no_think " to the last user message for
+    #    any model whose name starts with qwen3, then calls the
+    #    OpenAI-compatible endpoint. Two things are wrong with that, and the
+    #    second is the reason this is a defect rather than a preference:
+    #
+    #    1. It cannot work. The no-think branch of the qwen3 chat template is
+    #       gated on `$.Think`, which only Ollama's NATIVE api sets. Nothing
+    #       sent through the OpenAI-compatible path can reach it, whatever the
+    #       wording. Measured: identical output, identical timing, with and
+    #       without.
+    #
+    #    2. It is visible to the model AS PART OF WHAT THE USER SAID. The
+    #       robot is therefore told, every single turn, that the person in the
+    #       room opened with a slash command. It is a prompt injection with
+    #       good intentions.
+    #
+    #    Disabled at the flag rather than by deleting the two injection blocks:
+    #    one anchor instead of two ~15-line ones, so an upstream refactor that
+    #    moves the blocks does not silently stop matching. The blocks become
+    #    unreachable, which is honest about what happened and leaves them in
+    #    place to delete upstream.
+    #
+    # ⚠️ Turning reasoning OFF is still worth doing - it is worth seconds of
+    #    silence before the first word. It just cannot be done from here:
+    #    server/no-think.sh builds a model variant with that template branch
+    #    pinned, which is the supported way and is measured in model-floor.md.
+    (
+        "core/providers/llm/ollama/ollama.py",
+        '        self.is_qwen3 = self.model_name and self.model_name.lower().startswith("qwen3")',
+        "        # PATCHED: see server/patches/upstream-fixes.py. The /no_think\n"
+        "        # injection below cannot reach the template through the\n"
+        "        # OpenAI-compatible endpoint, and lands in the user's message\n"
+        "        # where the model reads it as something the person said.\n"
+        "        self.is_qwen3 = False",
+    ),
 ]
 
 
