@@ -256,8 +256,15 @@ Wake word → STT → model → TTS, with every backend a setting rather than a 
 - ✅ **Our own fully English, commented config**, with the privacy-relevant keys set explicitly and
   marked as such: the empty plugin allowlist and the memory summariser's `llm`, both of which inherit
   cloud defaults if omitted, because the config merges rather than replaces.
-- 🟡 Generic persona ✅ and local memory ✅; a log glossary for the Chinese server logs is still missing,
-  and it is the next thing somebody reading their own logs will want.
+- ✅ Generic persona, local memory, and a **[glossary for the Chinese server logs](server-logs.md)** —
+  the real strings from a running server, grouped by what you are trying to find out, with the five
+  lines worth learning at the top and a section for the ones that look alarming and are not.
+
+  The logs stay in Chinese deliberately: the patch kit translates what the model *reads* and the user
+  *hears*, because those reach somebody who did not ask for them, while a log is read by you, once,
+  when something is wrong. Translating every line would mean re-doing it on every upstream bump for no
+  gain. 🔴 One line in it earns its place on its own — `为记忆总结创建了专用LLM` names the model the
+  memory summariser uses, which is how you confirm it has not silently inherited a cloud default.
 - ✅ CPU-only / non-NVIDIA notes — [your-llm.md](your-llm.md) covers Apple Silicon, AMD and CPU,
   including the one check that tells you whether your GPU is really being used
 

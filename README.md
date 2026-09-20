@@ -58,6 +58,7 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 | **[Letting him see](docs/vision.md)** | a vision model on your own card, about 4 GB and a third of a second per photo — and what it costs you in the privacy checks |
 | **[Check the privacy claim](docs/privacy.md)** | six checks you can run yourself, and what this does *not* protect you from |
 | **[What the factory firmware talks to](docs/factory-firmware.md)** | the same scan run against the firmware it shipped with — a hardcoded OTA endpoint, a bare IP, and a call that registers the MAC |
+| **[Reading the server's logs](docs/server-logs.md)** | it logs in Chinese, and this is the glossary — including the one line that tells you your memory summariser is still local |
 | **[Roadmap](docs/roadmap.md)** | what is done, what is next, and what is still verified on only one robot |
 
 ### Feels like a lot?
