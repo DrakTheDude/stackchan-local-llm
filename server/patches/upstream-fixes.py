@@ -227,7 +227,7 @@ REPLACEMENTS = [
     (
         "core/providers/llm/ollama/ollama.py",
         '        self.is_qwen3 = self.model_name and self.model_name.lower().startswith("qwen3")',
-        "        # PATCHED: see server/patches/upstream-fixes.py. The /no_think\n"
+        "        # PATCHED at build time by the patch kit. The /no_think\n"
         "        # injection below cannot reach the template through the\n"
         "        # OpenAI-compatible endpoint, and lands in the user's message\n"
         "        # where the model reads it as something the person said.\n"
