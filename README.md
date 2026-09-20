@@ -13,9 +13,10 @@ By Drax and Claude. Built with [Claude Code](https://claude.com/claude-code).
 > **[Flash it from your browser](https://drakthedude.github.io/stackchan-local-llm/flash/)** — no toolchain, nothing to install — or build it
 > yourself from this tree.
 >
-> Verified on **one** StackChan, and the model measurements on **one** GPU. If you have either, a
-> report from a second is the most useful thing you could contribute — see
-> [docs/roadmap.md](docs/roadmap.md), and [tools/model-bench](tools/model-bench) if it is the GPU.
+> Verified on **one** StackChan, and the model measurements on **two** GPUs — which was enough for
+> them to disagree, and that disagreement is the most useful thing on the page. A second robot, or a
+> third card, would be worth more than any feature: [CONTRIBUTING.md](CONTRIBUTING.md) says what to
+> send and what not to (no full-flash dumps — they carry your Wi-Fi password).
 
 > ⚠️ **Flashing writes to the device, and an interrupted write can brick it.** Most failures are
 > recoverable — the ESP32 has a bootloader that survives a bad app image, and M5Burner can restore a
