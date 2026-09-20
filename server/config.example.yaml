@@ -253,6 +253,34 @@ TTS:
     #    from the top half.
     #
     # List all of them: curl -s http://localhost:8880/v1/audio/voices
+    #
+    # 🤖 FOR A ROBOT VOICE, point this at the espeak container instead - see the
+    #    `espeak` service in docker-compose.yml, started with
+    #    `docker compose --profile robotvoice up -d`. Kokoro has 68 voices and
+    #    every one of them is a person; flattening one gives a bored human rather
+    #    than a machine.
+    #
+    #      api_url: http://espeak:8890/v1/audio/speech
+    #      voice:   en-gb+m4
+    #
+    #    Chosen by listening to ten variants on the robot's own speaker, and the
+    #    findings are not obvious from espeak's documentation:
+    #
+    #      en-gb+m4      the most MACHINE-like of the set - the British formant
+    #                    model reads as a synthesiser
+    #      en-us+m1..m7  read as a DISTORTED HUMAN rather than a machine. The
+    #                    difference is the formant model, not the accent
+    #      en-us+croak   and +whisper are far too strong for daily use and would
+    #                    make an excellent seasonal body
+    #
+    # 🔴 AND PITCH ABOVE 50 BREAKS THE EFFECT, which is the opposite of the
+    #    instinct that brighter sounds more synthetic. Raising it pulls the
+    #    formants toward somebody with a bad connection; espeak's default of 50
+    #    is where it stays a machine.
+    #
+    #    The shim lets a voice carry one - "en-gb+m4@65" - because the OpenAI
+    #    speech contract has no pitch field and the voice string is the only slot
+    #    that passes through untouched. Leave it off unless you have a reason.
     voice: am_fenrir
     speed: 0.95
     format: wav

@@ -29,6 +29,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # through a 1 W speaker; 150 is a steadier baseline that still reads as brisk.
 BASE_WPM = 150
 
+# A voice may carry a pitch: "en-gb+m4@65". See split_voice - the contract has
+# no pitch field, and the voice string is the one slot that passes through.
 # The "voice" field arrives from the same config slot Kokoro's voices use, so it
 # is espeak's own voice name - en-us, en-gb, or a variant like en-us+m3. The
 # +mN and +fN variants are the interesting ones: they change the formant model
@@ -36,6 +38,23 @@ BASE_WPM = 150
 DEFAULT_VOICE = "en-us+m3"
 
 
+
+
+def split_voice(spec: str) -> tuple[str, int | None]:
+    """`en-gb+m4@65` -> ("en-gb+m4", 65). No @ means espeak's own default.
+
+    The pitch rides on the voice string because the OpenAI speech contract has
+    no field for it and the server's config has the same shape. `@` rather than
+    `+`, since `+` already means a formant variant to espeak.
+    """
+    if "@" not in spec:
+        return spec, None
+    voice, _, raw = spec.partition("@")
+    try:
+        # 0 is a drone and 99 is a whistle; this range is all listenable.
+        return voice, max(20, min(80, int(raw)))
+    except ValueError:
+        return voice, None
 
 def fix_wav_sizes(wav: bytes) -> bytes:
     """Rewrite the RIFF and data chunk sizes to match the bytes actually here.
@@ -117,7 +136,11 @@ class Handler(BaseHTTPRequestHandler):
         # Clamped: espeak accepts 80-450 and both ends are unintelligible.
         wpm = max(90, min(320, int(BASE_WPM * speed)))
 
-        cmd = ["espeak-ng", "-v", voice, "-s", str(wpm), "--stdout", text]
+        voice, pitch = split_voice(voice)
+        cmd = ["espeak-ng", "-v", voice, "-s", str(wpm)]
+        if pitch is not None:
+            cmd += ["-p", str(pitch)]
+        cmd += ["--stdout", text]
         try:
             done = subprocess.run(cmd, capture_output=True, timeout=30)
         except Exception as e:                      # noqa: BLE001
