@@ -25,7 +25,7 @@ Then tell the robot where it is, over the USB serial console (the same cable you
 flash with — see [below](#talking-to-him-over-serial) for how to send a line):
 
 ```
-STATUS_URL http://192.168.1.50:8899/mcp
+STATUS_URL http://10.0.0.5:8899/mcp
 ```
 
 Use the machine's LAN address, not `localhost` — `localhost` on the robot is the
