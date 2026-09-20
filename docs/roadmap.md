@@ -118,9 +118,10 @@ English-first board support, with every hardware assumption written down next to
   nobody retries it: VGA made the picture *darker* (mean 15 against 31), because the mode changes the
   PLL as well as the row length. `HalveUyvy()` and the whole YUV path went with it — the sensor emits
   RGB565 straight to the panel now.
-- ⬜ Behaviour, documented: face and expressions, head motion and the thinking pose, LED ring states,
-  camera (on-screen, plus a description when a vision model is configured), wake word ("Hi, Stack
-  Chan" — runs on the robot, not the server)
+- ✅ **Behaviour, documented** — [behaviour.md](behaviour.md): the face and its twenty-one expressions,
+  the head including the thinking tell and why it is silent, every LED ring state, the camera, the wake
+  word, standby, and the boot chime as a test result. Written as *what he does and why*, because most of
+  it looks like decoration and several of them are the only feedback you get when something is wrong.
 - ✅ **Hardware assumptions, each with a way to verify it** — the table in the
   [board README](../firmware/main/boards/m5stack/stackchan/README.md), now with a check per row and the
   sample size stated at the top rather than implied at the bottom. It also corrected itself: it still
