@@ -7,6 +7,9 @@
 #include <esp_netif.h>
 #include "status_source.h"
 #include "mcp_status_source.h"
+#include "serial_console.h"
+#include "system_info.h"
+#include <esp_chip_info.h>
 #include "wifi_board.h"
 #include "cores3_audio_codec.h"
 #include "display/lcd_display.h"
@@ -1699,6 +1702,89 @@ public:
             ok ? Lang::Sounds::OGG_SUCCESS : Lang::Sounds::OGG_EXCLAMATION);
     }
 
+    // 🧪 ONE REPORT, MEANT TO BE COMPARED WITH SOMEBODY ELSE'S.
+    //
+    //    Everything this firmware assumes about the hardware, read back from the
+    //    hardware, in a fixed order with fixed labels. Sent with `BOARD_REPORT`
+    //    over the serial console.
+    //
+    //    The point is not that any one line is interesting - it is that two
+    //    robots produce two reports that DIFF. This project has exactly one unit
+    //    to test on, so "the I2C map is 0x21/0x41/0x6F" is a sample of one
+    //    dressed up as a fact, and the honest way to find out is to make it
+    //    cheap for somebody with a different unit to show us theirs.
+    //
+    // 🔴 NO MAC ADDRESS, AND NO WI-FI NAME. A report designed to be pasted into
+    //    an issue must not carry an identifier for the person pasting it. The
+    //    chip revision and the flash size say everything a board variant needs
+    //    to say; a MAC says which device, and once it is in a public issue it is
+    //    there for good.
+    //
+    // ⚠️ The scan probes the shared bus, which is the same bus the audio codec
+    //    and the wake-word engine are using. It is a manual command for that
+    //    reason - it is not run at boot, and it is not on a timer.
+    void BoardReport() {
+        const esp_app_desc_t* app = esp_app_get_description();
+        esp_chip_info_t chip;
+        esp_chip_info(&chip);
+
+        ESP_LOGW(TAG, "==== board report ====");
+        ESP_LOGW(TAG, "firmware  %s  board " BOARD_NAME "  idf " IDF_VER, app->version);
+        ESP_LOGW(TAG, "chip      %s rev %d, %d core(s), flash %u MB, psram free %u KB",
+                 CONFIG_IDF_TARGET, chip.revision, chip.cores,
+                 (unsigned)(SystemInfo::GetFlashSize() / (1024 * 1024)),
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+
+        // The map this board hard-codes is in the board README. Printed here as
+        // WHAT ANSWERED, in address order and nothing else - a gap is then
+        // visible as a gap, rather than having to be inferred from which
+        // subsystem misbehaved.
+        std::string found;
+        char hex[8];
+        for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
+            if (i2c_master_probe(i2c_bus_, addr, 50) == ESP_OK) {
+                snprintf(hex, sizeof(hex), "0x%02X ", addr);
+                found += hex;
+            }
+        }
+        ESP_LOGW(TAG, "i2c       %s", found.empty() ? "NOTHING ANSWERED" : found.c_str());
+
+        // Not re-probed here: the scan above already says whether 0x6F and 0x41
+        // answered, and re-reading the rail register would mean another bring-up
+        // attempt as a side effect of asking a question.
+        ESP_LOGW(TAG, "rail      %s (0x6F drives it, 0x41 reports it)",
+                 rail_known_on_ ? "ON" : "OFF or never confirmed");
+
+        auto* codec = static_cast<CoreS3AudioCodec*>(GetAudioCodec());
+        ESP_LOGW(TAG, "audio     amp %s, mic %s, input %s, output %s",
+                 codec->AmpResponds() ? "ok" : "NO ANSWER",
+                 codec->MicResponds() ? "ok" : "NO ANSWER",
+                 codec->input_enabled() ? "open" : "closed",
+                 codec->output_enabled() ? "open" : "closed");
+
+        float pan = 0, tilt = 0;
+        const bool angles = head_.GetAngles(pan, tilt);
+        ESP_LOGW(TAG, "servos    centre pan %d tilt %d (%s), now %s",
+                 ScsServo::CenterFor(SCS_ID_PAN), ScsServo::CenterFor(SCS_ID_TILT),
+                 ScsServo::calibration_is_fallback() ? "FALLBACK - this unit's NVS was not read"
+                                                     : "this unit's factory NVS",
+                 angles ? "readable" : "NOT READABLE");
+        if (angles) {
+            ESP_LOGW(TAG, "          pan %.1f deg, tilt %.1f deg", pan, tilt);
+        }
+
+        ESP_LOGW(TAG, "leds      %d, controller %s", StackChanLeds::kLedCount,
+                 leds_.ready() ? "ready" : "NOT READY");
+        ESP_LOGW(TAG, "camera    %s", camera_ == nullptr ? "not initialised"
+                                                         : gc0308::Describe(i2c_bus_).c_str());
+        ESP_LOGW(TAG, "character body %s", GetBodyId().c_str());
+        ESP_LOGW(TAG, "privacy   mic %s, camera %s",
+                 mic_muted_ ? "MUTED" : "live", camera_off_ ? "OFF" : "on");
+        ESP_LOGW(TAG, "status    %s", McpStatusSource::Configured() ? "a URL is stored"
+                                                                    : "off (no URL)");
+        ESP_LOGW(TAG, "==== end of report ====");
+    }
+
     M5StackStackChanBoard() {
         // 🎭 Before the face exists, so he is never briefly somebody else. A
         //    character applied after the first frame is a visible flash, and on a
@@ -1768,6 +1854,17 @@ public:
         // serial peripheral directly and touches no console setting - see
         // mcp_status_source.cc for why that distinction cost a wedged port.
         McpStatusSource::ProvisionFromSerial();
+        // 🧪 A report somebody with a different unit can send back. On its own
+        //    task: it probes 112 I2C addresses and reads the servos, which is
+        //    far too much work for the console's reader.
+        SerialConsole::Register("BOARD_REPORT", "everything this board assumes, read back",
+                                [this](const std::string&) {
+            xTaskCreate([](void* arg) {
+                static_cast<M5StackStackChanBoard*>(arg)->BoardReport();
+                vTaskDelete(nullptr);
+            }, "board_report", 4096, this, 1, nullptr);
+        });
+        SerialConsole::Start();
         // The poller itself is NOT unconditional. No URL stored, no task, no
         // traffic: an unconfigured robot must not be a robot that quietly talks
         // to something.

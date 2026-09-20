@@ -112,6 +112,8 @@ the rest of the boot, and every later failure looks like a device that went away
 | `0x21` | GC0308 camera (SCCB) | already registered by the camera driver — never add it again through `I2cDevice` (that constructor aborts on a duplicate) |
 | `0x34` | AXP2101 PMIC | |
 | `0x58` | AW9523 IO expander | resets the amp and the display |
+| `0x36` | AW88298 amplifier | `AW88298_CODEC_DEFAULT_ADDR` is `0x36 << 1` — an **8-bit** address. Halve it before handing it to `i2c_master_probe`, which takes 7-bit |
+| `0x40` | ES7210 microphone codec | same again: the header's `0x80` is 8-bit |
 
 ---
 
@@ -119,14 +121,27 @@ the rest of the boot, and every later failure looks like a device that went away
 
 What this board file assumes about the hardware, and how to check each one.
 
+🔴 **Every row below was verified on ONE unit.** That is not a hardware
+specification, it is a sample of size one written down carefully. Anything here
+could turn out to be true only of the robot it was measured on, and the honest
+label for that is the one at the top of this section rather than a footnote at
+the bottom.
+
+**Send `BOARD_REPORT` over the USB serial console** and the robot prints all of
+it, read back from the hardware, in a fixed order — so two units produce two
+reports that diff. It deliberately prints no MAC address and no Wi-Fi name, so
+the output is safe to paste into an issue.
+
 | assumption | check |
 |---|---|
-| servo rail comes up via PY32 `0x6F` pins 0 and 13 | boot log: `servo motor rail ON` |
-| servos answer on UART1 (TX 6, RX 7) at 1 Mbaud, IDs 1 and 2 | boot log: `ping id 1: OK`, `ping id 2: OK` |
-| 12 LEDs, two strips, second strip wired in reverse | boot sweep runs down both sides together |
-| GC0308 camera with no XCLK / reset / power-down line | boot log: `camera:` line |
-| 🔴 **servo centre calibration** | **hard-coded from the reference unit** in `scs_servo.h`. Another robot's centre will differ, and the tilt safety clamp is computed around it. Must read each unit's own factory calibration before release |
-| **pan trim** (+14 counts) | measured on the reference unit only |
+| the I²C map in the table above | `BOARD_REPORT` → `i2c`, which lists what answered a scan of `0x08`–`0x77` |
+| servo rail comes up via PY32 `0x6F` pins 0 and 13, reported by `0x41` | boot log: `servo motor rail ON`; `BOARD_REPORT` → `rail` |
+| servos answer on UART1 (TX 6, RX 7) at 1 Mbaud, IDs 1 and 2 | boot log: `ping id 1: OK`, `ping id 2: OK`; `BOARD_REPORT` → `servos`, which also prints the live angles |
+| 12 LEDs, two strips, second strip wired in reverse | the boot sweep runs down both sides together; `BOARD_REPORT` → `leds` |
+| GC0308 camera with no XCLK / reset / power-down line | boot log: `camera:` line; `BOARD_REPORT` → `camera`, which reads the sensor's own registers |
+| amplifier and microphone codec answer on the shared bus | `BOARD_REPORT` → `audio`. ⚠️ Both go unreachable for a few hundred ms about ten seconds into every boot — see the open roadmap item |
+| **servo centre calibration is per-unit**, read from this robot's own NVS (`zero_pos_1` / `zero_pos_2`) | `BOARD_REPORT` → `servos` says `this unit's factory NVS` or **`FALLBACK`**. Fallback means the compiled-in centre is in use, the travel limits are a guess around it, and the tilt clamp — which exists because tilt has ~90° before a mechanical stop — is guessing too |
+| **pan trim** `CONFIG_STACKCHAN_PAN_TRIM`, default 0 | per-unit and unguessable, so it defaults to no trim rather than to this robot's value. A rebuild, which is the open half of the settings roadmap item |
 
 ## Things that surprise
 

@@ -121,10 +121,16 @@ English-first board support, with every hardware assumption written down next to
 - ⬜ Behaviour, documented: face and expressions, head motion and the thinking pose, LED ring states,
   camera (on-screen, plus a description when a vision model is configured), wake word ("Hi, Stack
   Chan" — runs on the robot, not the server)
-- ⬜ **Hardware assumptions, each with a way to verify it:** I²C device map, servo rail at `0x6F`, servo
-  IDs and per-unit calibration, LED chain order, camera sensor. Verified on one unit so far — say so.
-- ⬜ Board variants: a diagnostic mode that prints the I²C scan and rail / servo / codec checks, so a report
-  from a different unit can be compared against a known-good one
+- ✅ **Hardware assumptions, each with a way to verify it** — the table in the
+  [board README](../firmware/main/boards/m5stack/stackchan/README.md), now with a check per row and the
+  sample size stated at the top rather than implied at the bottom. It also corrected itself: it still
+  said the servo centre was hard-coded from the reference unit, which stopped being true when per-unit
+  calibration shipped. A stale assumption table is worse than none — it is read as current.
+- ✅ **Board variants: a diagnostic mode.** `BOARD_REPORT` over the USB serial console prints the I²C
+  scan, the rail, the servos and their calibration source, the LED chain, the codec, the camera's own
+  registers and the privacy switches — fixed order, fixed labels, so two units produce two reports that
+  **diff**. Deliberately no MAC address and no Wi-Fi name: a report meant to be pasted into an issue
+  must not carry an identifier for the person pasting it.
 - 🟡 **Finish moving settings onto the robot.** The on-screen menu exists and took the ones that matter
   most — Wi-Fi & server, volume, brightness, the self-check, About, and the privacy switches. What is
   still scattered: the **pan/tilt trim** is a rebuild, and it is the one number every owner has to set for

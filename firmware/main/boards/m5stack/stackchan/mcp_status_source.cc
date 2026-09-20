@@ -1,9 +1,9 @@
 #include "mcp_status_source.h"
 
+#include "serial_console.h"
 #include "settings.h"
 
 #include <cJSON.h>
-#include <driver/usb_serial_jtag.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
 #include <esp_log.h>
@@ -286,54 +286,8 @@ void McpStatusSource::Start() {
 //    holding the robot, and lands in NVS. Nothing is ever echoed back but a
 //    length.
 //
-// 🔴 Reads the USB Serial JTAG peripheral DIRECTLY, not stdin.
-//
-//    This was fgets(stdin) first, and it could never have worked:
-//
-//      CONFIG_ESP_CONSOLE_UART_DEFAULT=y                 <- stdin is UART0
-//      CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y    <- USB only mirrors
-//                                                           the log
-//
-//    So the log comes out over USB while stdin is bound to UART0, which is not
-//    connected to anything here. Nothing drained the USB receive FIFO, so the
-//    host's write filled it and then BLOCKED FOREVER - which is also what kept
-//    leaving the serial port wedged and needing a physical replug.
-//
-//    Installing the driver and reading the peripheral directly avoids touching
-//    the console configuration at all, so logging keeps working exactly as it
-//    did. Changing the primary console to USB would also have fixed it, and
-//    would have moved the one diagnostic channel this project depends on.
-void McpStatusSource::SerialTask(void*) {
-    usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
-    cfg.rx_buffer_size = 1024;
-    cfg.tx_buffer_size = 256;
-    const esp_err_t err = usb_serial_jtag_driver_install(&cfg);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "no serial provisioning: driver install failed (%s)",
-                 esp_err_to_name(err));
-        vTaskDelete(nullptr);
-        return;
-    }
-
-    std::string s;
-    uint8_t buf[64];
-    for (;;) {
-        const int n = usb_serial_jtag_read_bytes(buf, sizeof(buf), pdMS_TO_TICKS(500));
-        for (int i = 0; i < n; i++) {
-            const char c = static_cast<char>(buf[i]);
-            if (c != '\n' && c != '\r') {
-                // A CA PEM is the long one. Anything past this is a mistake, and
-                // silently truncating it would store half a certificate.
-                if (s.size() < 3000) s.push_back(c);
-                continue;
-            }
-            if (s.empty()) continue;
-            HandleProvisionLine(s);
-            s.clear();
-        }
-    }
-}
-
+// The reading of the port is not ours - see serial_console.h, which explains
+// why it cannot be, and why it must not be fgets(stdin).
 void McpStatusSource::HandleProvisionLine(const std::string& raw) {
     const std::string s = Trim(raw);
     if (s.rfind("STATUS_", 0) != 0) return;
@@ -421,5 +375,7 @@ void McpStatusSource::HandleProvisionLine(const std::string& raw) {
 }
 
 void McpStatusSource::ProvisionFromSerial() {
-    xTaskCreate(SerialTask, "status_prov", 3072, nullptr, 1, nullptr);
+    SerialConsole::Register("STATUS_", "URL TOOL TOKEN SECS CA SHOW OFF - ambient status",
+                            [](const std::string& line) { HandleProvisionLine(line); });
+    SerialConsole::Start();
 }

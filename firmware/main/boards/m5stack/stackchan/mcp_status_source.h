@@ -100,7 +100,6 @@ public:
 
 private:
     static void PollTask(void* arg);
-    static void SerialTask(void*);
     static void HandleProvisionLine(const std::string& line);
 
     bool PollOnce();
