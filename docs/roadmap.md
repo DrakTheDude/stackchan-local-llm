@@ -192,9 +192,10 @@ English-first board support, with every hardware assumption written down next to
   cloud defaults if omitted, because the config merges rather than replaces.
 - 🟡 Generic persona ✅ and local memory ✅; a log glossary for the Chinese server logs is still missing,
   and it is the next thing somebody reading their own logs will want.
-- ⬜ CPU-only / non-NVIDIA notes, if anything is acceptably fast
+- ✅ CPU-only / non-NVIDIA notes — [your-llm.md](your-llm.md) covers Apple Silicon, AMD and CPU,
+  including the one check that tells you whether your GPU is really being used
 
-## 3. Integration interface ⬜
+## 3. Integration interface 🟡
 
 **Decided: MCP is the contract — no new API.** It's what most users will already know, the server already
 mounts any MCP server as tools for the model, Home Assistant ships an official MCP server, and the reference
@@ -222,30 +223,39 @@ project proved the path end to end.
   `self.reboot`. 18 tool names in the binary became 14, and `claims.ini` asserts the four stay out —
   a subtree update would restore them and nothing else would notice.
 
-## 4. Reproducibility ⬜
+## 4. Reproducibility 🟡
 
 Full English docs, and a path from a factory device to a local robot in about 30 minutes.
 
-- ⬜ 🔑 **Quickstart: factory device → local robot in ~30 minutes.** Conditions stated up front: excludes the
-  model download (a 32B is ~20 GB), assumes Docker is installed, defaults to a smaller model.
-- ⬜ 🔑 **Factory firmware backup as the first step**, verified, plus the restore path. Backups contain Wi-Fi
-  credentials — say where *not* to keep them.
+- ✅ 🔑 **Quickstart: factory device → local robot in ~30 minutes.** [quickstart.md](quickstart.md):
+  back up, bring up the server, flash, first run, troubleshoot. Conditions stated at the top — what the
+  thirty minutes excludes is named rather than implied.
+- ✅ 🔑 **Factory firmware backup as the first step**, plus the restore path — section 0 of the
+  quickstart, before anything else, and repeated on the flasher page where the button is. The Wi-Fi
+  credentials warning is there: plain text, in NVS, treat it like a password file.
+
+  ⚠️ **"Verified" is not done**, and it is worth not pretending otherwise: nothing tells an owner how
+  to confirm their backup is actually good. A backup you cannot check is a backup you find out about
+  on the day you need it.
 - ✅ **Browser flasher** (ESP Web Tools, served from GitHub Pages) so owners can flash without
   installing anything. Serves the binaries from the *Pages artefact*, not from the release: release
   assets carry no `Access-Control-Allow-Origin`, so a browser cannot fetch them however correct the
   URLs are. Writes each part at its own offset rather than a merged image, because a merged image pads
   over NVS and destroys the per-unit servo calibration.
-- ⬜ Building from source: ESP-IDF version, the `SDKCONFIG_DEFAULTS` requirement, pre-flash checks
+- ✅ Building from source — [quickstart §2](quickstart.md), with the `deploy/build.sh` requirement
+  and why a plain `idf.py build` silently produces a different board
 - ⬜ Hardware bring-up guide
-- ⬜ Troubleshooting: symptom → cause → fix, generalised from the reference project
+- ✅ Troubleshooting: symptom → cause → fix — the table at the end of
+  [quickstart.md](quickstart.md#troubleshooting), plus the flasher page's own. Worth splitting into
+  its own page when it outgrows a table rather than before
 - ⬜ Known board variants, maintained from reports
 - ✅ **Automated firmware builds and versioned releases** (app + assets), with the release blocked
   unless the artefact is right: chip and board first, then the OTA URL, then the assets partition
   inspected for the wake-word model and the face. Three releases shipped for the wrong chip before
   those existed, and the check that would have caught all three is a blunt size floor.
-- ⬜ License (MIT) with upstream notices preserved; "by Drax and Claude, built with Claude Code"
+- ✅ License (MIT) with upstream notices preserved, and the attribution on the front page
 
-## Privacy you can verify ⬜
+## Privacy you can verify 🟡
 
 The reason the project exists, so it gets a page of its own rather than a promise.
 
