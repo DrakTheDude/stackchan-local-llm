@@ -31,3 +31,8 @@ RUN python3 /tmp/english-pass.py && rm /tmp/english-pass.py
 # Same assert-or-fail discipline - see the header of that file.
 COPY patches/upstream-fixes.py /tmp/upstream-fixes.py
 RUN python3 /tmp/upstream-fixes.py && rm /tmp/upstream-fixes.py
+# 🎭 A body's persona and voice. The firmware sends which body it is wearing in
+#    the handshake headers; this makes the server act on it. Separate from the
+#    two above because it is a FEATURE rather than a translation or a bug fix.
+COPY patches/bodies.py /tmp/bodies.py
+RUN python3 /tmp/bodies.py && rm /tmp/bodies.py

@@ -104,6 +104,23 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->SetHeader("Protocol-Version", std::to_string(version_).c_str());
     websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
+    // 🎭 WHICH BODY THIS ROBOT IS WEARING. A server that knows the name can pick
+    //    the matching voice and persona; one that does not ignores a header.
+    //
+    // 🔑 A HEADER RATHER THAN THE HELLO MESSAGE, and it matters. The server
+    //    builds its components - the voice among them - from config as soon as
+    //    the connection is accepted, while hello is still in flight. A body
+    //    announced in hello arrives after the persona is already in use. A
+    //    header is there before anything that depends on it exists.
+    //
+    //    It is sent in hello as well, because that is where a reader would look
+    //    first and it costs one string.
+    {
+        const auto body = Board::GetInstance().GetBodyId();
+        if (!body.empty()) {
+            websocket_->SetHeader("Body", body.c_str());
+        }
+    }
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
