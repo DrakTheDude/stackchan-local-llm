@@ -74,8 +74,9 @@ English-first board support, with every hardware assumption written down next to
   🔴 **And it was self-inflicted.** `PREVIEW_IMAGE_DURATION_MS` went 5s → 20s in `07c2bdf`, because
   five seconds was too short to look at a photo. Nobody connected "the photo stays longer" with "the
   face is gone for longer", because the two are the same screen and only one of them was being thought
-  about. The trade is real and the current setting is the deliberate one: **you cannot show a
-  photograph and a face at the same time on a 2" screen.**
+  about. **You cannot show a photograph and a face at the same time on a 2" screen**, so the number is
+  a trade rather than a preference. Settled at **10s** — 20 was for the camera work, and it covers the
+  description plus the first sentence of the reply, which is what the photo is for.
 
   Three suspects were ruled out by inspection first, including the one this item originally named —
   the `Tick()` screensaver guard cannot fire without a status source attached; the mouth is not

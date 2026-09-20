@@ -9,11 +9,21 @@
 #include <atomic>
 #include <memory>
 
-// 📷 LONG ENOUGH TO BE TALKED ABOUT. Five seconds sounds generous and is
-//    not: describing the photo costs a second or two, the reply has to be
-//    spoken after that, and the picture vanished while the robot was still
-//    saying what was in it. The photo IS the interaction - it can sit there.
-#define PREVIEW_IMAGE_DURATION_MS 20000
+// 📷 LONG ENOUGH TO BE TALKED ABOUT, AND NOT A SECOND LONGER. Five seconds -
+//    upstream's value - sounds generous and is not: describing the photo costs
+//    a second or two, the reply has to be spoken after that, and the picture
+//    vanished while the robot was still saying what was in it.
+//
+// 🔴 BUT THIS IS ALSO HOW LONG HIS FACE IS GONE. It is one screen. At 20s,
+//    which is what this was during the camera work, he delivered most of the
+//    reply with a photograph where his face should be and the face came back
+//    mid-sentence - reported, in good faith, as "the mouth stops moving after a
+//    photo". It took a serial capture to see that nothing had stopped.
+//
+//    So the number is a TRADE, not a preference: every second added to the
+//    photo is a second of talking to a picture. 10s covers the description and
+//    the first sentence of the reply, which is what the photo is for.
+#define PREVIEW_IMAGE_DURATION_MS 10000
 
 class LcdDisplay : public LvglDisplay {
 protected:
