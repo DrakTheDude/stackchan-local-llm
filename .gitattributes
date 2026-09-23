@@ -1,0 +1,14 @@
+# firmware/ is a git-subtree fork of 78/xiaozhi-esp32, brought in whole. Marking it
+# vendored tells GitHub Linguist — and the scanners that follow the same convention —
+# that it is somebody else's tree carried along, not code written here.
+#
+# This is not cosmetic. Without it the repository reads as a 3.5 MB C++ project, and a
+# scanner walking the whole tree attributes upstream's release tooling to this project:
+# firmware/scripts/versions.py uploads builds to Alibaba Cloud OSS and takes
+# OSS_ACCESS_KEY_SECRET and VERSIONS_TOKEN. Nothing here calls it, and this repository's
+# own CI uses no secrets at all.
+firmware/** linguist-vendored
+
+# …except the board, which IS the work. Everything else under firmware/ is an upstream
+# file with modifications; this directory is new code.
+firmware/main/boards/m5stack/stackchan/** -linguist-vendored
