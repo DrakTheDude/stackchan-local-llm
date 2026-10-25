@@ -117,6 +117,21 @@ gets the real binary.
 **If a proof passes by hand and fails in claimcheck — or the reverse — check which `grep` before
 suspecting the runner.** That one cost an hour elsewhere.
 
+## 🔴 On Windows, `shell=True` is cmd.exe
+
+Every proof here is POSIX — `!`, `test`, `$(...)` — and cmd.exe answers each with *"not
+recognized"*, which the checker then reported as the **claim** being false. On a clean Windows
+checkout six of ten claims "failed" and every `needs` skipped. Wrong answers, confidently printed.
+
+So on Windows, proofs and `needs` run through Git for Windows' `bash.exe`, found by walking up from
+`git` itself. Not the first `bash` on `PATH`: that can be the WSL launcher, which answers about a
+different filesystem. No Git for Windows, no POSIX proofs — install it, or run from WSL.
+
+Two smaller things went with it. A cp1252 console crashed on the first `✗` it printed, which read as
+the checker being broken rather than the project; output now replaces what the console cannot show.
+And `needs` ran in the caller's directory while the proof ran at the repo root, so running from a
+subdirectory skipped claims that could have been checked. Both now run in the same place.
+
 ## Two things learned building it
 
 **Scope privacy checks to files you author.** (Note this section names no addresses: a

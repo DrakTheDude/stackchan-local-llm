@@ -84,6 +84,43 @@ else:
 
 PASS, FAIL, WARN, SKIP = "pass", "fail", "warn", "skip"
 
+# ⚠️ A WINDOWS CONSOLE IS NOT UTF-8 BY DEFAULT, and printing the ✗ mark on a
+#    cp1252 console raised UnicodeEncodeError - the checker crashed on the first
+#    failing claim, which reads as the checker being broken rather than the
+#    project. Replace what the console cannot show instead of dying on it.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+
+def _sh(cmd: str) -> dict:
+    """subprocess.run arguments that run `cmd` through a POSIX shell.
+
+    🔴 ON WINDOWS, shell=True MEANS cmd.exe, NOT /bin/sh. Every proof here is
+       POSIX - `!`, `test`, `$(...)` - and cmd.exe answers each with "not
+       recognized", which this checker then reports as the CLAIM being false.
+       Measured: six of ten claims "failed" on a clean Windows checkout, and
+       every `needs` skipped. So on Windows, run through Git for Windows' bash,
+       found beside git itself. Not the first `bash` on PATH: that can be the
+       WSL launcher, which runs in a different filesystem and answers about a
+       different tree.
+    """
+    common = {"capture_output": True, "text": True,
+              "encoding": "utf-8", "errors": "replace"}
+    if os.name == "nt":
+        git = shutil.which("git")
+        # git.exe sits at Git\cmd\ or, depending on PATH order, Git\mingw64\bin\
+        # or Git\ucrt64\bin\ - so walk up to the install root, not a fixed depth.
+        d = os.path.dirname(git) if git else ""
+        for _ in range(3):
+            d = os.path.dirname(d)
+            bash = os.path.join(d, "bin", "bash.exe")
+            if d and os.path.exists(bash):
+                return {"args": [bash, "-c", cmd], **common}
+    return {"args": cmd, "shell": True, **common}
+
 
 class Claim:
     """One thing this project says is true, and how to find out."""
@@ -110,15 +147,17 @@ class Claim:
         self.timeout = sect.getint("timeout", fallback=30)
         self.needs = sect.get("needs", "").strip()
 
-    def needs_met(self) -> tuple[bool, str]:
+    def needs_met(self, cwd: str | None = None) -> tuple[bool, str]:
         """Can this proof even be attempted? Returns (ok, why-not)."""
         if " " not in self.needs:
             if shutil.which(self.needs) is None:
                 return False, f"needs `{self.needs}`, which is not on PATH"
             return True, ""
+        # Same cwd as the proof. `needs = test -f package.json` asked about the
+        # caller's directory while the proof ran at the repo root, so running
+        # from a subdirectory skipped claims that could have been checked.
         try:
-            p = subprocess.run(self.needs, shell=True, capture_output=True,
-                               text=True, timeout=self.timeout)
+            p = subprocess.run(**_sh(self.needs), timeout=self.timeout, cwd=cwd)
         except Exception as e:                  # noqa: BLE001 - report, never crash
             return False, f"needs `{self.needs}`, which could not run: {e}"
         if p.returncode != 0:
@@ -146,15 +185,12 @@ class Claim:
         #    non-zero exit; one without keeps the old meaning, so every manifest
         #    written before this behaves identically.
         if self.needs:
-            ok, why = self.needs_met()
+            ok, why = self.needs_met(cwd)
             if not ok:
                 return SKIP, why
 
         try:
-            p = subprocess.run(
-                self.prove, shell=True, capture_output=True, text=True,
-                timeout=self.timeout, cwd=cwd,
-            )
+            p = subprocess.run(**_sh(self.prove), timeout=self.timeout, cwd=cwd)
         except subprocess.TimeoutExpired:
             return FAIL, f"proof timed out after {self.timeout}s"
         except Exception as e:                      # noqa: BLE001 - report, never crash
